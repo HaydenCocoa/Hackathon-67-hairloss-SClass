@@ -1,7 +1,8 @@
 -- SMART CAMPUS -- 1,000 fictional sample students across nine intakes
 -- Run after schema.sql in Supabase Dashboard > SQL Editor as postgres.
 -- This file creates/updates the required intakes before inserting students.
--- Student codes: STU0001 through STU1000, in the intake order listed below.
+-- Student codes: TP000001 through TP001000, in the intake order listed below.
+-- Format: TP plus six digits (TP000001 through TP999999).
 -- Groups are assigned round-robin, balancing group sizes to within one student.
 -- Creates 1,000 student identities and 1,000 initial intake memberships.
 -- Rerunning refreshes names and planned memberships without replacing UUIDs or
@@ -61,7 +62,7 @@ with numbered_students as (
     ]::text[] as surnames
 )
 select
-  'STU' || lpad(n.sample_number::text, 4, '0') as student_code,
+  'TP' || lpad(n.sample_number::text, 6, '0') as student_code,
   names.given_names[((n.sample_number - 1) % 40) + 1]
     || ' ' || names.surnames[((n.sample_number - 1) / 40) + 1] as full_name,
   i.id as intake_id,

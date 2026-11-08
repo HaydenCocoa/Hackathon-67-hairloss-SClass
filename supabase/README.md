@@ -22,14 +22,14 @@ No user accounts, passwords, or sample records are inserted. Create login accoun
 
 `students` stores identity only. `student_intakes(student_id, intake_id, group_number)` stores memberships. Its composite primary key prevents a student joining the same intake twice, while allowing a different group in each intake. Memberships can be added or removed without duplicating or deleting the student's identity.
 
-After loading the student seed, this example gives `STU0001` a second intake membership:
+After loading the student seed, this example gives `TP000001` a second intake membership:
 
 ```sql
 insert into public.student_intakes (student_id, intake_id, group_number)
 select s.id, i.id, 2
 from public.students s
 cross join public.intakes i
-where s.student_code = 'STU0001' and i.intake_code = 'APD2F2506CS'
+where s.student_code = 'TP000001' and i.intake_code = 'APD2F2506CS'
 on conflict (student_id, intake_id) do update
 set group_number = excluded.group_number;
 ```
@@ -62,7 +62,7 @@ Rerunning updates the sample names while preserving existing lecturer UUIDs and 
 
 ## Sample students and intakes
 
-Run [seed_students.sql](seed_students.sql) after creating or upgrading the schema. It creates or updates these nine intakes, inserts 1,000 fictional student identities with codes `STU0001` through `STU1000` and distinct generated names, and adds 1,000 initial memberships:
+Run [seed_students.sql](seed_students.sql) after creating or upgrading the schema. It creates or updates these nine intakes, inserts 1,000 fictional student identities with codes `TP000001` through `TP001000` and distinct generated names, and adds 1,000 initial memberships:
 
 | Intake code | Students | Groups | Students per group |
 | --- | ---: | ---: | --- |
@@ -76,7 +76,7 @@ Run [seed_students.sql](seed_students.sql) after creating or upgrading the schem
 | APD3F2609CS | 200 | 6 | 34, 34, 33, 33, 33, 33 |
 | APD3F2609CS(SE) | 40 | 1 | 40 |
 
-No login accounts are created. Rerunning refreshes the sample students' names and the planned initial memberships' group numbers while preserving their existing UUIDs, linked accounts, and any additional intake memberships. Other records are not deleted. Existing codes in the `STU0001` through `STU1000` range are treated as this sample dataset.
+No login accounts are created. Rerunning refreshes the sample students' names and the planned initial memberships' group numbers while preserving their existing UUIDs, linked accounts, and any additional intake memberships. Other records are not deleted. Existing codes in the `TP000001` through `TP001000` range are treated as this sample dataset.
 
 The summary query shows only the 1,000 planned initial memberships and their group sizes, excluding any extra memberships added later. An existing higher group number that would become invalid prevents the intake update and rolls back the script; resolve that membership deliberately before retrying.
 
