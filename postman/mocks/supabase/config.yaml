@@ -1,0 +1,7 @@
+version: 1
+name: supabase-readonly
+description: Minimal Supabase Data API contract for the SClass connection probe
+interceptRequests: true
+scenarios:
+  - name: default
+    path: default.js

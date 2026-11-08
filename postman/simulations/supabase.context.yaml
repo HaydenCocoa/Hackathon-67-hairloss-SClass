@@ -1,0 +1,23 @@
+purpose:
+  stands_in_for: Supabase Data API rooms-table read used by the SClass connectivity probe
+  unblocks: Local verification without a hosted project or real credentials
+assumptions:
+  - id: bounded-select-response
+    status: supported
+    claim: The Data API supports an API-key-authenticated table select that returns a JSON array, including an empty array.
+    reason: Supabase documents the REST table-select contract. The local mock models only this bounded request and does not establish hosted availability or permissions.
+    verification: On 2026-11-08, reviewed Supabase Data API and API key documentation. Ran the real FastAPI probe against Postman CLI 1.74.0; its request log recorded select=id and limit=1, an empty-array 200, and a rejected-key 401. The integration test observed connected and error responses respectively. All 15 backend checks passed, including timeout and malformed-response cases against a temporary HTTP server.
+    source: https://supabase.com/docs/guides/api; https://supabase.com/docs/guides/getting-started/api-keys; backend/tests/test_app.py; postman/mocks/supabase/default.js
+    updated_at: "2026-11-08"
+  - id: live-project-access
+    status: unknown
+    claim: The intended Supabase project and configured server key permit reading public.rooms.
+    reason: No project URL or credentials were supplied. The real project has not been contacted. A simulated response cannot establish access to it.
+    verification: The browser showed backend online and configuration loaded; clicking Test connection returned setup-needed instructions. Add local credentials and use the menu to settle this claim. Owner-mock discovery was skipped because this CLI does not support postman status; the stand-in was authored from vendor documentation. Orbit discovery was unavailable due to DNS resolution failure.
+    source: Config/config.json; .env.example; backend/app/database.py; supabase/schema.sql
+    updated_at: "2026-11-08"
+fingerprints:
+  - id: initial-mvp
+    date: "2026-11-08"
+    commit: f0f8c58a8fa683524f8b69bbb87d6d37aed00954 (base commit; MVP files are uncommitted)
+    cli: Postman CLI 1.74.0

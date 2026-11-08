@@ -1,0 +1,6 @@
+simulation: sclass-supabase
+routing: path
+mocks:
+  - name: supabase
+    routeKey: rest
+    path: postman/mocks/supabase/config.yaml
