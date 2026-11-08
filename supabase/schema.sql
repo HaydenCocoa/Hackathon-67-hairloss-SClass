@@ -23,7 +23,8 @@ create table public.students (
   id uuid primary key default gen_random_uuid(),
   auth_user_id uuid unique references auth.users(id) on delete set null,
   student_code text not null unique check (btrim(student_code) <> ''),
-  full_name text not null check (btrim(full_name) <> '')
+  full_name text not null check (btrim(full_name) <> ''),
+  age integer constraint students_age_nonnegative check (age >= 0)
 );
 
 -- Group membership belongs to the student/intake pair, not the student's identity.
@@ -394,6 +395,7 @@ revoke all on public.class_session_details from public, anon, authenticated;
 grant select on public.class_session_details to authenticated, service_role;
 
 comment on column public.intakes.max_group is 'Consecutive valid groups are 1 through this number.';
+comment on column public.students.age is 'Age in whole years; NULL when unknown. Sample students use ages 18 through 25.';
 comment on table public.student_intakes is 'One group per student/intake membership; a student may belong to multiple intakes.';
 comment on column public.courses.duration_minutes is 'Positive whole minutes; locked once any class sessions exist.';
 comment on table public.class_sessions is 'Stores start time only. Use class_session_details for calculated ends_at.';

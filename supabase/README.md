@@ -18,6 +18,10 @@ For a new database, use only `schema.sql`; it already includes this change. Thes
 
 No user accounts, passwords, or sample records are inserted. Create login accounts through **Authentication > Users**, then link their UUIDs through `auth_user_id`. Student/lecturer records can be imported before their accounts exist. Create the first admin record through the SQL Editor using the intended account's UUID; app users cannot promote themselves.
 
+## Add age to an existing database
+
+For an existing database, run [migrations/202611080002_student_age.sql](migrations/202611080002_student_age.sql) before the updated student seed. It adds integer `students.age` without deleting records. Existing unknown ages remain NULL; negative ages are rejected. A new database created with the latest `schema.sql` already has this column. If you still have the single-intake schema, apply the membership upgrade first, then the age migration.
+
 ## Students with multiple intakes
 
 `students` stores identity only. `student_intakes(student_id, intake_id, group_number)` stores memberships. Its composite primary key prevents a student joining the same intake twice, while allowing a different group in each intake. Memberships can be added or removed without duplicating or deleting the student's identity.
@@ -35,6 +39,8 @@ set group_number = excluded.group_number;
 ```
 
 The student can then read classes and history for both matching intake/group combinations through the existing RLS policies. Membership rows are visible only to the owning student and admins. This model assumes a member attends every course assigned to that intake/group; selected-subject attendance would need course-level enrolments later.
+
+The student seed reserves `TP000001` through `TP001000`: rerunning it replaces all memberships for those sample codes with the current cohort plan, including any manually added memberships. Use student codes outside that range for records whose memberships should be independent of the sample seed.
 
 To inspect memberships in the SQL Editor:
 
@@ -62,23 +68,36 @@ Rerunning updates the sample names while preserving existing lecturer UUIDs and 
 
 ## Sample students and intakes
 
-Run [seed_students.sql](seed_students.sql) after creating or upgrading the schema. It creates or updates these nine intakes, inserts 1,000 fictional student identities with codes `TP000001` through `TP001000` and distinct generated names, and adds 1,000 initial memberships:
+Run [seed_students.sql](seed_students.sql) after creating or upgrading the schema (including the age migration). It creates or updates 18 intake codes and generates **1,000 unique student identities with 1,480 memberships**, arranged as the twelve cohorts below. Codes remain `TP000001` through `TP001000`, with distinct generated names and integer ages 18 through 25 (125 students per age).
 
-| Intake code | Students | Groups | Students per group |
+Paste the entire updated file into a new SQL Editor query and run it with no partial selection. The seed is a single atomic `DO` block with no temporary tables; its verification query is self-contained and can also run separately. If the block fails, its inserts and updates are rolled back together. There is no need to create or clear a planning table.
+
+| Intake code(s) for the same cohort | Unique students | Groups per intake | Students per group in each intake |
 | --- | ---: | ---: | --- |
-| APD1F2407CS(CYB) | 100 | 3 | 34, 33, 33 |
-| APD1F2407CS | 200 | 6 | 34, 34, 33, 33, 33, 33 |
-| APD1F2407CS(SE) | 40 | 1 | 40 |
-| APD2F2506CS(CYB) | 100 | 3 | 34, 33, 33 |
-| APD2F2506CS | 200 | 6 | 34, 34, 33, 33, 33, 33 |
-| APD2F2506CS(SE) | 40 | 1 | 40 |
-| APD3F2609CS(CYB) | 80 | 2 | 40, 40 |
-| APD3F2609CS | 200 | 6 | 34, 34, 33, 33, 33, 33 |
-| APD3F2609CS(SE) | 40 | 1 | 40 |
+| APU1F2611CS(CYB) | 100 | 3 | 34, 33, 33 |
+| APU1F2611CS | 100 | 3 | 34, 33, 33 |
+| APU1F2611CS(DF) | 100 | 3 | 34, 33, 33 |
+| APU1F2611CS(SE) | 40 | 1 | 40 |
+| APD1F2611CS(CYB) | 100 | 3 | 34, 33, 33 |
+| APD1F2611CS | 100 | 3 | 34, 33, 33 |
+| APD1F2611CS(DF) | 100 | 3 | 34, 33, 33 |
+| APD1F2611CS(SE) | 40 | 1 | 40 |
+| APD1F2407CS(CYB), APD2F2506CS(CYB), APD3F2609CS(CYB) | 80 | 2 | 40, 40 |
+| APD1F2407CS, APD2F2506CS, APD3F2609CS | 80 | 2 | 40, 40 |
+| APD1F2507CS(CYB), APD2F2606CS(CYB) | 80 | 2 | 40, 40 |
+| APD1F2507CS, APD2F2606CS | 80 | 2 | 40, 40 |
 
-No login accounts are created. Rerunning refreshes the sample students' names and the planned initial memberships' group numbers while preserving their existing UUIDs, linked accounts, and any additional intake memberships. Other records are not deleted. Existing codes in the `TP000001` through `TP001000` range are treated as this sample dataset.
+Each of the last four rows represents the same 80 students belonging to every intake listed in that row. These are not separate sets of 80 for each code. The final cohort uses `APD2F2606CS` without `(CYB)`, as confirmed. The first eight cohorts account for 680 unique students; the final four account for 320. Their membership counts total 680 + 240 + 240 + 160 + 160 = 1,480.
 
-The summary query shows only the 1,000 planned initial memberships and their group sizes, excluding any extra memberships added later. An existing higher group number that would become invalid prevents the intake update and rolls back the script; resolve that membership deliberately before retrying.
+No login accounts are created. Rerunning refreshes sample names/ages and **replaces all intake memberships for the reserved 1,000 sample student codes**. Student UUIDs, linked accounts, meeting attendance, and other students' memberships are preserved. Obsolete memberships from the previous seed are removed before intake group limits are reduced. Older intake records themselves are retained, along with shared course/schedule records.
+
+The independent summary query shows actual sample memberships by intake and group: 18 rows, totaling 1,480 memberships. It counts memberships rather than unique student identities. Existing non-sample memberships or class sections using groups above a new maximum cause the entire seed to roll back; adjust those deliberately before retrying.
+
+## Reset student data
+
+Run the entire [reset_students.sql](reset_students.sql) file as `postgres` in the SQL Editor to delete **all** student identities, intake memberships, and student meeting-attendance records. It keeps Supabase Auth accounts, lecturers, admins, intakes, courses, rooms, class sessions, meeting sessions, and change history. Login links are removed with the student identities. The deletes run in one transaction and do not cascade into other tables.
+
+You can then rerun `seed_students.sql` to recreate the sample students and their 1,480 planned memberships. Recreated students receive new UUIDs and have no linked login accounts until you link them again. A reset is not required just to switch from the previous intake plan: the new seed replaces sample memberships itself while preserving existing student IDs.
 
 ## What is included
 
@@ -104,7 +123,7 @@ Once this setup is adopted, keep later schema changes in separate migration file
 
 ## Local validation
 
-The scripts passed 89 checks against PostgreSQL through PGlite with a minimal mocked Supabase Auth schema: 50 schema/integrity/access checks and 39 seed/membership/upgrade checks. Coverage includes all thirteen tables, group limits, derived class end times, duration locking, role-based reads across multiple intake memberships, membership removal, preserved account links, idempotent sample scripts, and a data-preserving upgrade from the previous schema. Unexpected old-column dependencies are tested to abort the upgrade without losing data. This is not a live Supabase deployment or a simultaneous-request stress test.
+The scripts passed 130 checks against PostgreSQL through PGlite with a minimal mocked Supabase Auth schema: 52 schema/integrity/access checks and 78 seed/membership/upgrade checks. Coverage includes all thirteen tables, group limits, integer age validation, sample ages 18 through 25, derived class end times, role-based access, and data-preserving upgrades. Seed checks cover the exact group sizes for 18 intakes, shared student identities across linked intakes, 1,000 unique students with 1,480 memberships, replacement of outdated sample memberships, preservation of other students and login links, and conversion of the previous nine-intake dataset. The seed and verification query are tested separately without temporary tables. A late failure restores removed memberships and earlier records. This is not a live Supabase deployment or a simultaneous-request stress test.
 
 To rerun from the project folder in PowerShell, with Node.js installed:
 

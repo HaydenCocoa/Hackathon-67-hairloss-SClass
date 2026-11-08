@@ -21,12 +21,14 @@ async function main() {
   check((await q("select count(*)::int n from pg_tables where schemaname='public'"))[0].n===13,'13 application tables');
   check((await q("select count(*)::int n from pg_tables where schemaname='public' and rowsecurity"))[0].n===13,'RLS on all tables');
   check((await q("select column_name from information_schema.columns where table_schema='public' and table_name='students' and column_name in ('intake_id','group_number')")).length===0,'identity has no intake/group fields');
+  check((await q("select data_type from information_schema.columns where table_schema='public' and table_name='students' and column_name='age'"))[0].data_type==='integer','student age is an integer');
   const users = await q('insert into auth.users select gen_random_uuid() from generate_series(1,4) returning id');
   const [studentUser, otherUser, lecturerUser, adminUser] = users.map(r=>r.id);
   const intake=(await q("insert into intakes(intake_code,max_group) values ('CS-2026',3) returning id"))[0].id;
   const small=(await q("insert into intakes(intake_code) values ('CS-2027') returning id"))[0].id;
   const student=(await q("insert into students(auth_user_id,student_code,full_name) values ($1,'S1','Student 1') returning id",[studentUser]))[0].id;
   const other=(await q("insert into students(auth_user_id,student_code,full_name) values ($1,'S2','Student 2') returning id",[otherUser]))[0].id;
+  await reject('update students set age=-1 where id=$1',[student],/students_age_nonnegative/i);
   await q('insert into student_intakes(student_id,intake_id,group_number) values ($1,$2,3),($3,$4,1)',[student,intake,other,small]);
   const lecturer=(await q("insert into lecturers(auth_user_id,lecturer_code,full_name) values ($1,'L1','Lecturer 1') returning id",[lecturerUser]))[0].id;
   await q("insert into admins(auth_user_id,full_name) values ($1,'Admin 1')",[adminUser]);

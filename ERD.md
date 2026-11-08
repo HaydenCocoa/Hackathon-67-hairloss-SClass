@@ -21,6 +21,7 @@ erDiagram
         uuid auth_user_id FK, UK "Nullable until account is linked"
         text student_code UK
         text full_name
+        int age "Whole years; nullable when unknown"
     }
     STUDENT_INTAKES {
         uuid student_id PK, FK "Composite primary key"
@@ -128,6 +129,7 @@ erDiagram
 - `AUTH_USERS` represents Supabase's existing `auth.users` table; do not create a replacement table.
 - `intakes.max_group` is a required positive integer, defaulting to 1. The valid group numbers are consecutive integers from 1 through `max_group`; no group table or group UUID is needed. Hide the group label when `max_group = 1`.
 - `students` stores identity only. `student_intakes` links one student to any number of intakes, with composite primary key `(student_id, intake_id)`. It allows one group per student per intake and prevents duplicate memberships.
+- `students.age` is an integer in whole years with a nonnegative check. It can be NULL for existing students whose age is unknown. The 1,000-student seed supplies ages 18 through 25.
 - `student_intakes.group_number` and `class_sections.group_number` are required positive integers, defaulting to 1. Many memberships can share an intake/group pair; do not make that pair unique.
 - Validate each membership's group against its intake's `max_group`. Validate each section's group against the intake reached through its course offering. Use database triggers or protected transactional operations for these cross-table rules, including changes to intake/offering references.
 - Reject reductions of `max_group` that would invalidate existing memberships or class sections. Validation must also handle concurrent changes, using a consistent locking strategy across intake updates and membership changes. A row-level `CHECK` alone cannot enforce a range stored in another table.
@@ -172,4 +174,6 @@ Implementation references: [PostgreSQL cross-table constraint limitations](https
 
 For a new project, run [supabase/schema.sql](supabase/schema.sql). For a project using the previous single-intake schema, run [the membership upgrade](supabase/migrations/202611080001_student_intake_memberships.sql) instead; it preserves existing identities and transfers intake/group values into memberships. See [setup instructions](supabase/README.md).
 
-[supabase/seed_students.sql](supabase/seed_students.sql) creates 1,000 unique students and 1,000 initial memberships across the nine planned intakes. Rerunning it preserves additional memberships added later. The database contains 13 application tables plus Supabase's existing authentication table shown here.
+For an existing database without `students.age`, also run [the age upgrade](supabase/migrations/202611080002_student_age.sql). It adds an integer age column while retaining existing records.
+
+[supabase/seed_students.sql](supabase/seed_students.sql) creates 1,000 unique students in twelve cohorts, with 1,480 memberships across 18 intake codes. The last four cohorts share the same 80 student identities across their listed intakes. Rerunning replaces all memberships for the reserved sample student codes while preserving their UUIDs, linked accounts, and other students' memberships. The database contains 13 application tables plus Supabase's existing authentication table shown here.
