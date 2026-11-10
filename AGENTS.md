@@ -18,3 +18,4 @@
 - Calendar eligibility alone does not establish lecturer, student, or room availability; those checks belong to later booking validation.
 - Teaching requirements repeat weekly over a database-defined period. Each lecture/lab section has a plan with a Monday start week, number of weeks, and occurrences per week. Preserve occurrence identity and original week when cancelling or moving it.
 - Step 3 uses the existing database dataset, confirmed ready by the user. Meeting and deliberately infeasible dataset fixtures are deferred for the initial MVP; do not add them as completion blockers or invent new hosted sample records.
+- The confirmed room policy is configurable: lectures use classrooms/auditoriums; tutorials and labs use classrooms/labs. Missing or empty mappings (initially `others`) reject placement. Use snapshot room rules, not the removed legacy section field.

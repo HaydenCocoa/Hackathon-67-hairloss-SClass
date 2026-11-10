@@ -40,11 +40,13 @@ Implementation and verification: [Teaching calendar](docs/backend/scheduling-cal
 
 **Status:** core weekly-recurrence requirements implemented locally on 10 November 2026; hosted migration is pending. See [implemented weekly teaching plans](docs/backend/weekly-teaching-plans.md) and the [original requirements discussion](docs/backend/teaching-requirements.md). Additional proposals below remain under review.
 
-Additional database proposals are under review, not implemented. See [offering end dates and system-defined room suitability](docs/backend/offering-end-dates-and-room-policy.md).
+The offering-date proposal is deferred. Required-room-type removal is accepted; [a SQL-only patch is prepared and verified](docs/backend/required-room-type-removal.md), but hosted execution and backend/seed adaptation remain pending. See the [earlier design assessment](docs/backend/offering-end-dates-and-room-policy.md).
 
 - [ ] Confirm the course-offering end date's inclusive local-date semantics, its relationship to teaching-plan bounds, and whether make-up classes require an explicit extension.
 - [ ] Obtain real offering end dates and define a safe backfill/update policy; do not infer them from intake codes or silently invalidate existing bookings.
-- [ ] Confirm a system room-compatibility policy before removing `class_sections.required_room_type`; update later loading, validation, candidate generation, seeds, and views together.
+- [x] Prepare SQL for accepted `class_sections.required_room_type` removal, updating known views and trigger references; 25 local database checks passed.
+- [ ] Apply the room-type removal patch to the hosted database and adapt backend readers, old course seeds/migrations, fresh setup, and the ERD.
+- [x] Confirm and implement the system room policy for loading and validation: lectures use classrooms/auditoriums; tutorials and labs use classrooms/labs. Step 6 must reuse this captured policy for candidate generation.
 - [ ] Keep automatic public-holiday and semester-break handling deferred; continue respecting configured hours and explicit closures.
 
 - [x] Maintain recurring teaching plans in the database, as confirmed by the user.
@@ -81,16 +83,19 @@ Dataset readiness is user-confirmed, not an independent live database audit. No 
 
 ## 4. Build the scheduling-data loader
 
-- [ ] Load required occurrences that still need placement.
-- [ ] Resolve the assigned lecturer for each section.
-- [ ] Resolve each class roster through matching `student_intakes.intake_id` and `group_number`.
-- [ ] Preserve actual student IDs so conflicts across different intakes can be detected.
-- [ ] Count unique attending students when checking room capacity.
-- [ ] Load room type, capacity, and active status.
-- [ ] Load existing classes, meetings, and reservations relevant to the scheduling horizon, including bookings that overlap its boundaries.
-- [ ] Derive class end times from course duration; use explicit end times for meetings.
-- [ ] Load calendar rules and validate missing or inconsistent input.
-- [ ] Produce one consistent input snapshot for the engine, independent of frontend requests.
+**Status:** complete and verified locally on 10 November 2026: 96 backend tests passed (1 optional simulation test skipped), and 258 database checks passed. Apply the new `202611100003_scheduling_snapshot.sql` migration before using the loader against Supabase. See [implementation and usage](docs/backend/scheduling-data-loader.md).
+
+- [x] Load weekly occurrences and expose only those still needing placement through `pending_requirements`.
+- [x] Resolve and validate the assigned lecturer identities.
+- [x] Resolve class rosters through matching `student_intakes.intake_id` and `group_number`.
+- [x] Preserve actual student IDs across intake memberships.
+- [x] Deduplicate student IDs and provide actual class sizes.
+- [x] Load room type, capacity, and active status without deciding room availability.
+- [x] Load scheduled class/meeting bookings and existing class reservations that overlap the week, including bookings beginning before it. Empty meeting data is valid.
+- [x] Derive class end times from course duration; use explicit meeting end times.
+- [x] Resolve configured opening windows and validate missing or inconsistent database input.
+- [x] Produce an immutable engine input using one read-only database snapshot and a content fingerprint.
+- [x] Support occurrence views before and after the room-requirement removal patch without inventing a new compatibility policy.
 
 | Input | What the loader must resolve |
 | --- | --- |
@@ -105,43 +110,51 @@ Dataset readiness is user-confirmed, not an independent live database audit. No 
 
 ## 5. Build a standalone booking validator
 
-- [ ] Accept a proposed occurrence, start time, and room.
-- [ ] Check lecturer overlaps across classes and meetings.
-- [ ] Check student overlaps across all intake memberships and meeting attendance.
-- [ ] Check room overlaps across classes, meetings, and reservations.
-- [ ] Check room capacity, required type, and active status.
-- [ ] Check the full duration against teaching hours and explicit closures; apply no break restrictions.
-- [ ] Ignore cancelled bookings when determining occupied time.
-- [ ] Exclude the occurrence's original placement when validating a reschedule.
-- [ ] Use half-open intervals, such as `[10:00, 11:30)`, so adjacent classes do not overlap.
-- [ ] Return structured rejection reasons such as `ROOM_TOO_SMALL`, `STUDENT_CONFLICT`, or `LECTURER_CONFLICT`.
+**Status:** complete and verified locally on 10 November 2026. Focused validator suite: 52 passed; full backend suite: 148 passed, 1 optional test skipped. No new migration is needed. See [booking validation](docs/backend/booking-validation.md).
+
+- [x] Accept an occurrence, aware start, room, and explicit schedule/reschedule mode; derive end time from course duration.
+- [x] Check lecturer overlaps across classes and meetings.
+- [x] Check actual student overlaps across intake memberships and meeting attendance.
+- [x] Check room overlaps across classes, meetings, and fixed reservations.
+- [x] Check room capacity, active status, and the user-confirmed configurable course-to-room policy.
+- [x] Check full duration against the selected week and effective opening windows; apply no break restrictions.
+- [x] Ignore cancelled bookings and require explicit reopening of cancelled teaching demand.
+- [x] Exclude only the occurrence's matching original class booking in reschedule mode.
+- [x] Use half-open intervals so adjacent classes do not overlap.
+- [x] Return structured rejection reasons, conflicting booking references, and student-conflict counts.
+- [x] Capture room policy in the input fingerprint so changes invalidate earlier preview context.
 
 **Complete when:** every proposed booking receives a clear valid/invalid result with specific reasons.
 
 ## 6. Generate candidate placements
 
-- [ ] Calculate feasible start-time ranges for each occurrence without imposing a fixed start-time grid.
-- [ ] Filter rooms by active status, required type, and sufficient capacity.
-- [ ] Preserve exact course durations and do not round starts to preset intervals.
-- [ ] Remove placements that conflict with calendar rules or fixed bookings.
-- [ ] Return a clear explanation when an occurrence has no candidates.
-- [ ] Keep the scheduling horizon explicit so failure means no candidate within that horizon and the supplied rules.
+**Status:** complete and verified locally on 10 November 2026. Candidate and validator suites: 76 passed; full backend suite: 172 passed, 1 optional simulation test skipped. No new migration. See [candidate generation](docs/backend/candidate-generation.md).
+
+- [x] Calculate complete room-specific start-time ranges with inclusive boundaries and no preset start grid.
+- [x] Share validator checks for room activity, captured compatibility policy, and capacity.
+- [x] Preserve exact durations and microsecond start boundaries, including single-start exact-fit gaps.
+- [x] Subtract merged lecturer, student, and room booking intervals from effective teaching windows.
+- [x] Return structured diagnostics for lifecycle, closed windows, unsuitable rooms, and insufficient uninterrupted free time.
+- [x] Include the explicit captured horizon and snapshot revision in results.
+- [x] Generate independent candidates for every pending occurrence and identify blocked occurrences; joint assignment remains step 7.
 
 **Complete when:** every occurrence has a list of possible placements or a clear explanation of why none exists.
 
 ## 7. Implement CP-SAT generation for feasibility
 
-- [ ] Build the scheduling model using Google OR-Tools CP-SAT.
-- [ ] Choose integer solver time units with explicit precision, consistent with unrestricted start times; do not introduce preset teaching slots.
-- [ ] Select exactly one placement per required occurrence.
-- [ ] Enforce lecturer, student, and room conflicts between newly generated classes.
-- [ ] Enforce conflicts against existing bookings and reservations.
-- [ ] Keep existing bookings and reservations fixed.
-- [ ] Ensure the model and standalone validator follow the same scheduling policies.
-- [ ] Set a configurable search time limit.
-- [ ] Distinguish `OPTIMAL`, `FEASIBLE`, `INFEASIBLE`, `UNKNOWN`, and invalid-model outcomes.
-- [ ] Never report a timeout without a solution as proof that no timetable exists.
-- [ ] Never silently omit required classes to make generation appear successful.
+**Status:** complete and verified locally on 10 November 2026. Focused solver suite: 29 passed; full backend suite: 201 passed, 1 optional simulation test skipped. OR-Tools is declared in backend requirements and installed locally. No new migration. See [joint CP-SAT scheduling](docs/backend/cp-sat-scheduling.md).
+
+- [x] Build a joint feasibility model using Google OR-Tools CP-SAT.
+- [x] Encode relative integer microseconds exactly, preserving all representable candidate boundaries without preset slots or float rounding.
+- [x] Select one room and start per pending occurrence, with the full duration mandatory.
+- [x] Enforce no-overlap for shared lecturers, actual students, and room choices among new classes.
+- [x] Enforce fixed-booking/reservation/meeting conflicts through internally generated candidate domains.
+- [x] Preserve existing bookings and exclude already-scheduled/cancelled demand from regeneration.
+- [x] Validate complete solver output against the standalone validator and independently check new-class resource conflicts.
+- [x] Configure search time, worker count, and random seed in the existing config file.
+- [x] Distinguish successful, infeasible, unresolved, invalid-model, and empty-input outcomes.
+- [x] Return no partial assignments when search is unresolved or infeasible.
+- [x] Never drop a required occurrence; a missing candidate blocks the entire draft with diagnostics.
 
 Individually valid candidates can still conflict with one another. The solver must consider the complete set of new assignments together.
 

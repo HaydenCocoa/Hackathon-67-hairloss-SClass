@@ -30,6 +30,20 @@ assumptions:
     verification: On 2026-11-10, verified recurrence and access locally using PGlite with minimal mocked Supabase Auth. No hosted calls were made. Apply the migration, enter real teaching periods, and verify the authorized reader against the intended project before relying on live results.
     source: supabase/migrations/202611100001_teaching_requirements.sql; supabase/tests/teaching-requirements.test.cjs; docs/backend/weekly-teaching-plans.md
     updated_at: "2026-11-10"
+  - id: scheduling-snapshot-rpc
+    status: supported
+    claim: Under the documented PostgREST RPC contract, the backend can POST a selected Monday and timezone and consume a single complete JSON scheduling snapshot from the local database function.
+    reason: PostgREST documents named JSON arguments for RPC POST. The new STABLE function resolves the payload under one database snapshot, and actual PostgreSQL output was consumed by the real backend transport over a controlled HTTP stand-in.
+    verification: On 2026-11-10, 32 snapshot SQL checks passed, along with 53 focused loader/weekly-reader tests and 96 full backend tests (one optional simulation check skipped). Assertions verify the single RPC path/body and synthetic authentication headers, roster resolution, week boundaries, immutability, fingerprints, schema-removal compatibility, malformed data, missing RPC, upstream failure, and timeout behavior. No Postman CLI simulation or live provider call was made; the CLI is unavailable. Owner-mock discovery was not performed.
+    source: https://docs.postgrest.org/en/stable/references/api/functions.html; https://www.postgresql.org/docs/current/xfunc-volatility.html; supabase/migrations/202611100003_scheduling_snapshot.sql; supabase/tests/scheduling-snapshot.test.cjs; backend/tests/test_scheduling_loader.py
+    updated_at: "2026-11-10"
+  - id: hosted-scheduling-snapshot-rpc
+    status: unknown
+    claim: The intended hosted project has the step 4 function installed and its Data API permits the trusted backend key to invoke it.
+    reason: The new migration and role grants have only been verified locally. Hosted migration state and PostgREST schema-cache behavior have not been inspected by this task.
+    verification: Prepared an additive migration with explicit execute grants and a schema-cache reload notification. Apply it after the teaching-requirement migration and verify the real authorized call before claiming live readiness. Local tests do not establish hosted deployment or concurrent-transaction stress behavior.
+    source: supabase/migrations/202611100003_scheduling_snapshot.sql; docs/backend/scheduling-data-loader.md
+    updated_at: "2026-11-10"
 fingerprints:
   - id: initial-mvp
     date: "2026-11-08"

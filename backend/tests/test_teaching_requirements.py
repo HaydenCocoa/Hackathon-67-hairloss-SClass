@@ -176,3 +176,14 @@ def test_reader_reports_upstream_timeout(database_server):
     with pytest.raises(HTTPException) as error:
         read_week(settings)
     assert error.value.status_code == 504
+
+
+def test_reader_accepts_view_without_removed_room_requirement(database_server):
+    settings, state = database_server
+    row = requirement()
+    del row["required_room_type"]
+    state["rows"] = [row]
+    result = read_week(settings)
+    assert result[0].required_room_type is None
+    assert result[0].course_type == "lab"
+    assert state["calls"][0]["query"]["select"] == ["*"]

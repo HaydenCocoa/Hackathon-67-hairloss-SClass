@@ -41,6 +41,8 @@ Removing a section-level room requirement is reasonable when requirements are un
 
 Proposed starting policy, awaiting confirmation:
 
+Historical proposal: the user later confirmed a different mapping in step 5. Current behavior is lecture → classroom/auditorium; tutorial and lab → classroom/lab. See [accepted policy and validator](booking-validation.md). The table below is retained as proposal history, not active policy.
+
 | `courses.course_type` | Allowed `rooms.room_type` values |
 | --- | --- |
 | `lab` | `lab` |

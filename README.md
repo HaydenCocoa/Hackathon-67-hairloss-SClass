@@ -12,7 +12,7 @@ backend/
   app/config.py       Startup configuration validation
   app/database.py     Read-only Supabase connectivity check
   app/main.py         HTTP endpoints and built frontend serving
-  app/scheduling/     Teaching calendar and database-backed weekly requirements
+  app/scheduling/     Calendar, weekly requirements, validated engine input loader
   tests/              Backend integration checks
 docs/backend/         Backend decisions, implementation notes and progress
 frontend/
@@ -90,6 +90,34 @@ The internal `load_weekly_requirements` function reads the selected target week'
 
 See [teaching-plan setup and behavior](docs/backend/weekly-teaching-plans.md). The migration is verified locally; applying it to a hosted project and entering actual teaching periods remain setup actions.
 
+## Scheduling input loader
+
+Apply [the snapshot migration](supabase/migrations/202611100003_scheduling_snapshot.sql) after the teaching-requirement migration. The internal `load_scheduling_snapshot` function then reads one consistent week's requirements, unique student rosters, lecturers, rooms, and overlapping bookings through a read-only server-only database function. It adds configured opening windows and returns immutable input with a content fingerprint for later scheduling work.
+
+Both the loader and older weekly reader support views with or without the removed legacy section room-type field. Configured compatibility rules are captured for booking validation. See [loader setup, validation, and verification](docs/backend/scheduling-data-loader.md).
+
+## Booking validation
+
+`BookingValidator` checks an occurrence, aware start time, and room against the loaded snapshot. It derives the end time, validates opening hours and room activity/capacity/type, and checks lecturer, student, and room overlaps. Results contain structured reasons and conflicting booking references. Reschedule mode excludes only the matching original class booking.
+
+Configure `scheduling.room_compatibility`: lectures use classrooms/auditoriums; tutorials and labs use classrooms/labs. The initial `others` mapping is empty and requires explicit configuration before placement. Policy is part of the snapshot fingerprint; the legacy section room-type field does not override it. No new migration is required for this step.
+
+Validation is internal and read-only. See [validator usage and verification](docs/backend/booking-validation.md).
+
+## Candidate start ranges
+
+`CandidateGenerator` finds complete room-specific ranges of valid starts for a lesson, using the same lifecycle, room, and booking-conflict rules as the validator. It subtracts fixed occupied periods from teaching windows and preserves exact duration and fractional-second boundaries. For a two-hour class in a free window from 08:30 to 12:00, the valid start range is 08:30–10:00 inclusive.
+
+Generate one occurrence or every pending occurrence from an existing snapshot. Results include diagnostics when rooms or time ranges are unavailable; candidate generation does not reserve resources or choose a joint timetable. See [candidate generation and verification](docs/backend/candidate-generation.md).
+
+## Joint timetable generation
+
+`solve_weekly_schedule(snapshot, settings.scheduling.solver)` uses OR-Tools CP-SAT to assign a room and start to every pending lesson together. It enforces clashes for shared rooms, lecturers, and students across intakes, preserves fixed bookings, and verifies the complete result before returning it. Time is encoded in exact relative microseconds, without preset teaching slots.
+
+Install updated backend requirements for OR-Tools. Configure `scheduling.solver` for search time (default 10 seconds), worker count (default 1), and random seed (default 0). Results distinguish complete solutions, proven infeasibility, unresolved search, invalid models, and an empty pending week. No partial timetable is returned as complete.
+
+This step produces a feasibility draft. Quality objectives, preview endpoints, and authorized booking writes remain later steps. No new database migration is required. See [solver setup, usage, statuses, and verification](docs/backend/cp-sat-scheduling.md).
+
 ## API contract
 
 | Method / path | Result |
@@ -100,7 +128,7 @@ See [teaching-plan setup and behavior](docs/backend/weekly-teaching-plans.md). T
 | `GET /docs` | Interactive OpenAPI reference |
 | `GET /openapi.json` | Generated, reusable API contract |
 
-Database results include `status`, a safe `message`, UTC `checked_at`, and `latency_ms` (populated on success). Missing credentials, rejected access, missing table, upstream failure, timeout and invalid responses have distinct safe messages. A successful check verifies a read via the Supabase Data API, rather than just reaching its HTTP server. This is an MVP with no authentication, scheduling operations or preference persistence.
+Database results include `status`, a safe `message`, UTC `checked_at`, and `latency_ms` (populated on success). Missing credentials, rejected access, missing table, upstream failure, timeout and invalid responses have distinct safe messages. A successful check verifies a read via the Supabase Data API, rather than just reaching its HTTP server. The scheduling engine is internal; this MVP has no authentication, scheduling HTTP endpoints, booking writes, or preference persistence yet.
 
 ## Verify
 

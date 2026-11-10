@@ -49,10 +49,22 @@ class OpeningHours(SettingsModel):
         return self
 
 
+CourseType = Literal["lecture", "tutorial", "lab", "others"]
+RoomType = Literal["classroom", "lab", "auditorium"]
+
+
+class SolverSettings(SettingsModel):
+    max_time_seconds: float = Field(default=10.0, gt=0, allow_inf_nan=False)
+    num_search_workers: int = Field(default=1, ge=1, le=32, strict=True)
+    random_seed: int = Field(default=0, ge=0, le=2147483647, strict=True)
+
+
 class SchedulingSettings(SettingsModel):
     timezone: str = Field(min_length=1)
     opening_hours: dict[Weekday, OpeningHours] = Field(min_length=1)
     closed_dates: list[date] = Field(default_factory=list)
+    room_compatibility: dict[CourseType, tuple[RoomType, ...]] = Field(default_factory=dict)
+    solver: SolverSettings = Field(default_factory=SolverSettings)
 
     @field_validator("timezone")
     @classmethod

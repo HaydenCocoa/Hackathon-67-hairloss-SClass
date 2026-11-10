@@ -128,6 +128,29 @@ class Supabase:
             raise HTTPException(502, "Supabase returned an unexpected response.")
         return body
 
+    async def rpc(self, function: str, parameters: dict[str, Any]) -> dict[str, Any]:
+        """Call a trusted JSON-object RPC; no upstream details reach callers."""
+        if not re.fullmatch(r"[a-z][a-z0-9_]*", function):
+            raise ValueError("Invalid database function name")
+        try:
+            response = await self.client.post(
+                f"{self.url}/rest/v1/rpc/{function}", headers=self.headers,
+                json=parameters, timeout=self.timeout,
+            )
+        except httpx.TimeoutException:
+            raise HTTPException(504, "Supabase timed out. Try again.")
+        except httpx.RequestError:
+            raise HTTPException(502, "Could not reach Supabase. Check the project URL and network.")
+        if response.status_code != 200:
+            raise HTTPException(502, f"Supabase could not load scheduling data (HTTP {response.status_code}). Check database migrations and server permissions.")
+        try:
+            body = response.json()
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            raise HTTPException(502, "Supabase returned an invalid scheduling snapshot.")
+        return body
+
 
 def in_list(values) -> str:
     # IDs come from our own database (UUIDs), so quoting is enough.

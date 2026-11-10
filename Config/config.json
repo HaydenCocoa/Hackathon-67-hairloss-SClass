@@ -22,6 +22,17 @@
       "thursday": {"opens_at": "08:30", "closes_at": "18:00"},
       "friday": {"opens_at": "08:30", "closes_at": "18:00"}
     },
-    "closed_dates": []
+    "closed_dates": [],
+    "room_compatibility": {
+      "lecture": ["classroom", "auditorium"],
+      "tutorial": ["classroom", "lab"],
+      "lab": ["classroom", "lab"],
+      "others": []
+    },
+    "solver": {
+      "max_time_seconds": 10,
+      "num_search_workers": 1,
+      "random_seed": 0
+    }
   }
 }
