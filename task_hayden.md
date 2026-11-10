@@ -162,6 +162,8 @@ Individually valid candidates can still conflict with one another. The solver mu
 
 ## 8. Add timetable quality objectives
 
+**Status:** postponed by the user on 10 November 2026. Continue with step 9 using the existing feasibility solver. These objectives remain future work, not completed requirements.
+
 - [ ] Measure idle minutes between each student's first and last class per day; no mandatory breaks apply.
 - [ ] Make reducing total student waiting time the first optimization objective.
 - [ ] Add lecturer gap reduction as a lower-priority objective.
@@ -180,12 +182,20 @@ Initial preference order:
 
 ## 9. Expose generation as a preview operation
 
-- [ ] Add an API operation such as `POST /api/schedules/generate`.
-- [ ] Accept a selected teaching week and supported scheduling options.
-- [ ] Return proposed assignments, solver status, quality measurements, and diagnostic information.
-- [ ] Keep generation separate from committing actual bookings.
-- [ ] Associate the preview with its input revision so later data changes can be detected.
-- [ ] Make the operation usable through FastAPI's API documentation.
+**Status:** complete and verified locally on 10 November 2026. The user requested implementation based on the proposal and a service-hosted test page. Applied the recommended whole-week, local-development scope. See [preview API and test page](docs/backend/schedule-preview-api.md).
+
+- [x] Add `POST /api/schedules/generate`.
+- [x] Accept a selected Monday teaching week; use server-configured solver options.
+- [x] Return proposed assignments, solver status, counts, diagnostic information, and search statistics.
+- [x] Explicitly identify quality optimization as disabled; quality measurements are deferred with step 8.
+- [x] Keep generation separate from committing actual bookings.
+- [x] Associate the preview with its input revision so later data changes can be detected.
+- [x] Schedule all pending occurrences jointly; restrict API/page/assets to direct localhost access in the development environment, with host/origin/proxy checks.
+- [x] Make the operation usable through FastAPI's API documentation.
+- [x] Serve `/development/scheduling-test-hayden` with Monday selection, API submission, local-time preview table, diagnostics, errors, and raw JSON.
+- [x] Bound generation to one request per process and offload solver work so unrelated requests remain responsive.
+
+Verification: **29 focused API tests**, **230 full backend tests passed, 1 optional simulation test skipped**, and **10 DOM/page tests passed**, including served-page to real HTTP to synthetic PostgreSQL snapshot to solver to rendered response. Visual browser verification was blocked by an app-access approval timeout. Hosted database/migration readiness was not tested.
 
 **Complete when:** timetable generation can be demonstrated through the API without a frontend or changes to actual bookings.
 

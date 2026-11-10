@@ -70,7 +70,7 @@ Open **http://127.0.0.1:8000**. FastAPI serves the compiled Vue app and API from
 - `Config/config.json` is required at backend startup and remains tracked by Git. It holds app branding, environment label, allowed development origins, Supabase environment variable names, check table, timeout, and scheduling calendar rules. Invalid/missing settings stop startup with a validation error. Restart the backend after edits.
 - `.env` contains the actual Supabase URL and key. Existing environment variables take precedence. `.env` is ignored; `.env.example` is tracked. Never store keys in tracked configuration or `VITE_*` variables. The browser only receives the three public fields under `app`.
 - `Config/preference.json` is an ignored `{}` placeholder. It is deliberately not read, written, or exposed by the app. Git clones will not contain it; future preference support can create it when needed.
-- Only the compiled index and assets are served. The Config directory and `.env` are not public web files.
+- The compiled index/assets and the explicit local-development scheduling test page are served. The Config directory and `.env` are not public web files.
 
 ## Teaching calendar
 
@@ -116,7 +116,13 @@ Generate one occurrence or every pending occurrence from an existing snapshot. R
 
 Install updated backend requirements for OR-Tools. Configure `scheduling.solver` for search time (default 10 seconds), worker count (default 1), and random seed (default 0). Results distinguish complete solutions, proven infeasibility, unresolved search, invalid models, and an empty pending week. No partial timetable is returned as complete.
 
-This step produces a feasibility draft. Quality objectives, preview endpoints, and authorized booking writes remain later steps. No new database migration is required. See [solver setup, usage, statuses, and verification](docs/backend/cp-sat-scheduling.md).
+This engine produces a feasibility draft. Quality objectives are postponed; step 9 now exposes local preview generation. Authorized booking writes remain step 10. No new database migration is required for these computation/API steps. See [solver setup, usage, statuses, and verification](docs/backend/cp-sat-scheduling.md).
+
+## Scheduling test page
+
+With FastAPI running, open **http://127.0.0.1:8000/development/scheduling-test-hayden**. Select a Monday and generate a preview of all pending classes for that week. The page sends a request to the same API and displays proposed classes in campus-local time, readable course/room labels, solver outcome, diagnostics, and raw JSON. It works without building Vue.
+
+This is a read-only local-development tool: no bookings are saved and quality optimization is disabled. The API/page require `app.environment=development` and a direct localhost connection; remote/proxy access is rejected until authenticated access is implemented. Live generation requires configured Supabase access and the earlier teaching-plan/snapshot migrations and data. See [API contract, setup, and test evidence](docs/backend/schedule-preview-api.md).
 
 ## API contract
 
@@ -125,10 +131,12 @@ This step produces a feasibility draft. Quality objectives, preview endpoints, a
 | `GET /api/health` | `200`: backend liveness, independent of Supabase |
 | `GET /api/config` | `200`: public `name`, `description`, `environment` |
 | `GET /api/health/database` | `200`: `connected`; `503`: `not_configured`, `error`, or `timeout` |
+| `POST /api/schedules/generate` | Development-only weekly preview; body `{"week_start":"2026-11-16"}`; no booking writes |
+| `GET /development/scheduling-test-hayden` | Development-only page for requesting and reviewing generated schedules |
 | `GET /docs` | Interactive OpenAPI reference |
 | `GET /openapi.json` | Generated, reusable API contract |
 
-Database results include `status`, a safe `message`, UTC `checked_at`, and `latency_ms` (populated on success). Missing credentials, rejected access, missing table, upstream failure, timeout and invalid responses have distinct safe messages. A successful check verifies a read via the Supabase Data API, rather than just reaching its HTTP server. The scheduling engine is internal; this MVP has no authentication, scheduling HTTP endpoints, booking writes, or preference persistence yet.
+Database health results include `status`, a safe `message`, UTC `checked_at`, and `latency_ms` (populated on success). Missing credentials, rejected access, missing table, upstream failure, timeout and invalid responses have distinct safe messages. A successful health check verifies a read via the Supabase Data API. Scheduling previews expose the existing engine through a guarded development endpoint; administrator authentication, booking writes, and preference persistence remain future work.
 
 ## Verify
 

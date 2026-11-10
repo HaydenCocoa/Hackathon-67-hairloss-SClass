@@ -44,6 +44,13 @@ assumptions:
     verification: Prepared an additive migration with explicit execute grants and a schema-cache reload notification. Apply it after the teaching-requirement migration and verify the real authorized call before claiming live readiness. Local tests do not establish hosted deployment or concurrent-transaction stress behavior.
     source: supabase/migrations/202611100003_scheduling_snapshot.sql; docs/backend/scheduling-data-loader.md
     updated_at: "2026-11-10"
+  - id: scheduling-preview-api
+    status: supported
+    claim: The real FastAPI preview route loads one read-only snapshot RPC, runs the solver, and returns complete assignments or safe explicit outcomes without booking writes; the served page can ingest and render that response.
+    reason: Reused the existing local PostgreSQL-output HTTP stand-in because the Postman CLI is unavailable and its existing mock covers only the rooms probe. No live provider or owner mock discovery was performed.
+    verification: On 2026-11-10, 29 focused API tests and 230 full backend tests passed with one optional simulation test skipped. Assertions cover the read-only RPC path, complete results, no private roster IDs, failures and timeouts, input validation, local-development access guards, configured solver options, and bounded concurrent generation with responsive health checks. Ten Node/jsdom page checks passed, including actual served HTML/JS calling the API against a synthetic provider and rendering a solved week and an empty week. Browser app access approval timed out, so visual/browser verification is not claimed. No hosted migration or scheduling request was performed.
+    source: backend/tests/test_schedule_preview.py; backend/tests/schedule-preview-ui.test.cjs; backend/tests/serve_schedule_preview.py; docs/backend/schedule-preview-api.md
+    updated_at: "2026-11-10"
 fingerprints:
   - id: initial-mvp
     date: "2026-11-08"

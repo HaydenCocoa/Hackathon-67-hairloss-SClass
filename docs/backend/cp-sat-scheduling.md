@@ -121,4 +121,4 @@ The full integration suite also requires the previously established local Node/P
 
 ## Remaining work
 
-Step 8 introduces quality objectives for student gaps, lecturer gaps, and room utilization. Preview endpoints, authorization, transactional booking/audit writes, stale-input revalidation, and lecturer rescheduling orchestration remain later steps. A valid draft is tied to captured input and does not reserve resources against concurrent changes.
+The user postponed step 8's quality objectives for student gaps, lecturer gaps, and room utilization on 10 November 2026. [Step 9's local preview API and test page](schedule-preview-api.md) now use this feasibility solver. Administrator authentication, transactional booking/audit writes, stale-input revalidation, and lecturer rescheduling orchestration remain unimplemented. A valid draft is tied to captured input and does not reserve resources against concurrent changes.

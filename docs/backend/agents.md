@@ -15,7 +15,7 @@ The user requested this convention on 10 November 2026. Repository-level `AGENTS
 - Prevent conflicts using actual student identities across all their intake memberships.
 - Respect both class and meeting bookings and preserve future reservations.
 - Generate a valid timetable before optimizing student gaps, lecturer gaps, and room utilization.
-- Proposed algorithm: OR-Tools CP-SAT for generation involving many classes; simpler candidate search and ranking for one-class rescheduling. The solver is planned and is not installed or implemented yet.
+- OR-Tools CP-SAT feasibility generation is implemented and verified locally in step 7. Simpler candidate search and ranking for one-class rescheduling remain planned.
 - Separate generation previews from authorized, transactional booking commits.
 
 Source: [Notes / Hackathon](https://app.notion.com/p/4117da63706d807095f2fbdab3321a17), last edited 9 November 2026. The lecturer use case includes cancelling or moving a class to a scheduled week or reserving a placement before a future week is generated.
@@ -38,6 +38,8 @@ Step 1 now adds validated scheduling settings, a reusable calendar helper, and i
 
 Step 2 adds database-defined weekly teaching plans, automatic expansion into stable occurrences, optional booking links, cancellation/move integrity, and an internal paginated weekly-demand reader. The migration is verified locally but not applied to a hosted project. See [implemented weekly teaching plans](weekly-teaching-plans.md) for setup, interfaces, decisions, and limits.
 
+Steps 4-7 add the validated weekly snapshot, shared booking validator, unrestricted candidate ranges, and complete CP-SAT feasibility generation with post-solve verification. Step 8 quality optimization is postponed. Step 9 exposes read-only generation through a local-development HTTP API and a service-hosted test page; these are verified locally. Authentication and transactional booking commits remain future work.
+
 No database schema or hosted data was changed for step 1. No frontend change was needed.
 
 ## Development roadmap and status
@@ -51,8 +53,8 @@ No database schema or hosted data was changed for step 1. No frontend change was
 | 5 | Explainable room, lecturer, student, and reservation conflict validation | Complete and verified locally; no new migration |
 | 6 | Feasible start ranges and suitable rooms without preset teaching slots | Complete and verified locally; no new migration |
 | 7 | CP-SAT generation satisfying all mandatory constraints and reporting accurate solver status | Complete and verified locally; no new migration |
-| 8 | Configurable objectives for student gaps, lecturer gaps, and room utilization | Planned |
-| 9 | Generation preview API including assignments, quality, diagnostics, and input revision | Planned |
+| 8 | Configurable objectives for student gaps, lecturer gaps, and room utilization | Postponed by the user; future enhancement |
+| 9 | Generation preview API and test page including assignments, diagnostics, and input revision; quality deferred | Complete and verified locally; direct localhost/development access only |
 | 10 | Authorized, transactional commits with revalidation, concurrency control, audit, and retry protection | Planned |
 | 11 | Safe rescheduling, cancellation, and fixed future reservations | Planned |
 | 12 | Verified requirements-to-generation-to-commit-to-retrieval workflow and acceptance scenarios | Planned |
@@ -77,7 +79,7 @@ No database schema or hosted data was changed for step 1. No frontend change was
 - No holiday dates have been supplied; `closed_dates` is empty and does not automatically import public holidays.
 - Initial opening windows are same-day only; overnight opening is not implemented.
 - Full availability, timetable generation, booking persistence, permissions, and concurrency protection are not completed by the calendar milestone.
-- Later generation work must choose an explicit solver time precision without reintroducing preset teaching slots.
+- Step 7 uses integer microseconds without preset teaching slots. Quality optimization is postponed. Local preview generation is implemented; trusted saving and revalidation remain step 10.
 
 ## Step 2 discussion — 10 November 2026
 
@@ -186,3 +188,28 @@ Historical discussion; superseded by the implementation record below after the u
 - Verification: **29 focused solver cases passed**. Full backend suite: **201 passed, 1 optional simulation test skipped**, in 59.27 seconds, with one existing test-client deprecation warning. Coverage includes joint conflicts, independent parallel classes, scarce-room allocation, room/start-domain linkage, exact fractional-second starts, fixed-booking preservation, complete-only outcomes, actual tiny-budget `UNKNOWN`, and a six-component/40-student weekly case. `FEASIBLE` labeling and invalid-model/verification-error branches use explicit fault injection with real solving where applicable.
 - Extended the real local PostgreSQL-output → HTTP snapshot → candidate → solver integration, including the schema without legacy room requirements. No additional provider request is made during solving. No SQL source changed, so earlier standalone SQL-suite results were not rerun or represented as new evidence. No hosted data was queried or changed.
 - Updated the checklist, root README, candidate notes, and [solver setup, interface, and verification](cp-sat-scheduling.md). Documentation links and `git diff --check` passed. Step 8 is the next unimplemented milestone.
+
+## Step 8 postponement and step 9 discussion - 10 November 2026
+
+- The user postponed timetable quality improvements and requested discussion of step 9. Step 8 remains incomplete future work; the existing step 7 feasibility solver is the basis for the next milestone.
+- Added [the preview API proposal](schedule-preview-api.md), describing a Monday-week request, fresh snapshot loading, worker-based solving, typed complete results, safe diagnostics, explicit lack of quality optimization, and no booking writes. It is a proposal, not an implemented API.
+- Recommended a single request/response operation using server-configured search limits and scheduling all pending occurrences jointly. Recommended no new preview persistence in this read-only milestone; step 10 still needs trusted draft handling and transactional revalidation. Input revision alone is neither authorization nor a resource lock.
+- Asked the user to confirm all-week versus intake/group generation and local-development access versus administrator authentication now. Both decisions remain open. Existing authentication integration is absent; an unrestricted deployed campus-wide endpoint is not proposed.
+- Updated the roadmap, solver remaining-work notes, and checklist to reflect postponed quality work and the step 9 discussion. Corrected the obsolete project-direction statement that the solver was still uninstalled/unimplemented.
+- No application code, configuration, SQL, hosted data, or runtime behavior changed. Runtime/database suites were not rerun for this documentation-only task.
+- Verification: `git diff --check` passed; all **32 local documentation links** across the four changed/new Markdown files resolved. The first link-check script mishandled the root checklist's empty parent path; it was corrected to use absolute file paths and rerun successfully.
+
+## Step 9 implementation - 10 November 2026
+
+- The user requested implementation based on the proposal and a very simple page hosted on the same service at `/development/scheduling-test-hayden`. Applied the proposal's recommended whole-week scope, server-controlled search options, single request/response, no preview storage, and local-development access while administrator authentication remains deferred. Earlier discussion questions are superseded by these implementation defaults; intake/group filtering and remote/admin access are not implemented.
+- Added `backend/app/scheduling/preview.py` and mounted its router. `POST /api/schedules/generate` validates an exact Monday date, rejects extra input fields, loads a fresh snapshot, runs the verified engine in a worker, and returns complete typed results with readable course/room labels from the same snapshot. No additional provider lookup is needed for labels. Student identity lists and raw snapshots are excluded.
+- Responses preserve solver outcomes, revision, counts, diagnostics, and search statistics. `quality_optimized=false` and `quality=null` explicitly reflect postponed step 8. Infeasible, unknown, and empty-week outcomes return 200 without partial assignments. Safe structured errors distinguish invalid requests, missing configuration, provider failures/timeouts, malformed input data, invalid models, internal failures, and busy generation.
+- Bound the complete load/solve/verify operation to one request per process; further requests receive 429 with `Retry-After`. Worker offloading keeps health requests responsive. AnyIO cancellation shielding retains the slot through normal scoped cancellation while the worker finishes. This is not distributed concurrency control or a booking lock. Added an explicit AnyIO dependency.
+- Restricted API, HTML, JS, and CSS to `app.environment=development`, loopback peer and Host, approved browser Origin when present, and no forwarding headers. This deliberately does not support reverse-proxy/remote access. CORS now permits POST for configured origins; CORS is not the access boundary. Administrator authentication remains future work. Responses/page assets use no-store headers; HTML includes a self-only content policy.
+- Added the plain HTML/CSS/JS test page, served independently of the Vue build. It selects a Monday using configured campus timezone, sends a same-origin request, disables controls during work, and renders new placements in campus-local time (including fractional seconds), status/counts, candidate diagnostics, revision, and raw JSON. It distinguishes empty/infeasible/unknown outcomes and recovers controls after request failures. Provider labels are inserted as text rather than HTML.
+- Verification: **29 focused API tests passed**; **230 full backend tests passed, 1 optional simulation test skipped**, in 76.79 seconds, with one existing Starlette/httpx deprecation warning. Tests cover the actual local PostgreSQL-output to HTTP loader to real solver to API response path, error privacy, no booking writes, access restrictions, explicit failures, configured options, busy responses, and responsiveness during solving. An initial infeasibility-response failure exposed nested computed-field serialization; round-trip model dumping corrected it and the suite passed afterward.
+- **10 Node/jsdom page tests passed** in 1.78 seconds, including actual served HTML/JS making a real HTTP request to a synthetic provider-backed solver service and rendering both a valid preview and an empty subsequent week. Other cases cover date validation, UTC-to-campus display with microseconds, text-only labels, unknown/infeasible outcomes, progress, stale-view hiding, malformed responses, busy errors, and network failures. This establishes DOM/request behavior, not visual layout or real-browser policy enforcement.
+- Browser UI verification was attempted, but native browser-app access approval timed out. No visual/browser success is claimed. Used an isolated ignored jsdom 26 installation and existing Python/PGlite tooling; no global tooling changed. Added a reproducible synthetic UI QA server in `backend/tests/serve_schedule_preview.py`. No live Supabase request, migration, sample insertion, or booking write was performed.
+- Started the actual FastAPI service on `127.0.0.1:8000` for the requested page. A separate temporary synthetic service on port 8001 was used only for UI verification. Existing hosted migrations/data must still be ready before live generation succeeds. No public/cloud deployment was performed.
+- Updated the checklist, README, [implemented API/page notes](schedule-preview-api.md), solver remaining-work notes, and simulation evidence. Step 9 is complete locally; step 10 safe saving remains unimplemented and step 8 remains postponed.
+- Final verification: the checked-in synthetic UI QA helper started successfully and all 10 page checks passed again (1.70 seconds). The actual service returned HTTP 200 for the requested page on port 8000. Stopped the temporary port-8001 QA service after testing; port 8000 remains running. All **46 local documentation links** across five changed/new Markdown files resolved; JavaScript syntax and `git diff --check` passed. Postman CLI remains unavailable; no CLI simulation run is claimed.

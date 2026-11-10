@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import AppSettings, PROJECT_ROOT, Settings, load_settings
 from .database import DatabaseHealth, check_database
 from .scheduling.calendar import TeachingCalendar
+from .scheduling.preview import create_preview_router
 from .student import create_student_router
 
 
@@ -32,7 +33,7 @@ def create_app(settings: Settings | None = None, frontend_dist: Path | None = No
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.server.cors_origins,
-        allow_methods=["GET"],
+        allow_methods=["GET", "POST"],
         allow_headers=["Accept", "Content-Type"],
     )
 
@@ -52,6 +53,7 @@ def create_app(settings: Settings | None = None, frontend_dist: Path | None = No
 
     # Student Page (Bi Jin): profile + weekly timetable
     app.include_router(create_student_router(settings.supabase))
+    app.include_router(create_preview_router(settings))
 
     @app.get("/", include_in_schema=False)
     async def index():
