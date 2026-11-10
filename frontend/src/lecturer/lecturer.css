@@ -1,0 +1,198 @@
+/* Lecturer page: Google-style theme (white base; blue, red, yellow and light green accents).
+   Everything is scoped under .lecturer and every class starts with lc- so it cannot clash with the
+   global src/style.css (which styles bare elements such as main, h1, button, .brand and .active). */
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+
+.lecturer {
+  --lc-blue: #4285f4;   --lc-blue-d: #1a73e8;  --lc-blue-tint: #e8f0fe;  --lc-blue-ink: #174ea6;
+  --lc-red: #ea4335;    --lc-red-d: #c5221f;   --lc-red-tint: #fce8e6;
+  --lc-yellow: #fbbc04; --lc-yellow-d: #8a5300; --lc-yellow-tint: #fef7e0;
+  --lc-green: #81c995;  --lc-green-d: #137333; --lc-green-tint: #e6f4ea;
+  --lc-text: #202124;
+  --lc-muted: #5f6368;
+  --lc-line: #dadce0;
+  --lc-surface: #f8f9fa;
+  --lc-radius: 12px;
+  --lc-shadow: 0 1px 2px rgba(60, 64, 67, .3), 0 1px 3px 1px rgba(60, 64, 67, .15);
+
+  min-height: 100vh;
+  background: #fff;
+  color: var(--lc-text);
+  font: 400 14px/1.45 'Google Sans', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+.lecturer *, .lecturer *::before, .lecturer *::after { box-sizing: border-box; }
+.lecturer h1, .lecturer h2, .lecturer h3 { font-family: inherit; letter-spacing: normal; margin: 0; }
+.lecturer p { margin: 0; }
+.lecturer button, .lecturer input, .lecturer select, .lecturer textarea { font: inherit; color: inherit; }
+.lecturer a { color: inherit; text-decoration: none; }
+.lecturer :focus-visible { outline: 3px solid var(--lc-blue); outline-offset: 2px; }
+.lecturer .lc-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* --- top bar --- */
+.lecturer .lc-topbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  padding: 10px 24px; border-bottom: 1px solid var(--lc-line); background: #fff;
+}
+.lecturer .lc-brand { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.lecturer .lc-back { color: var(--lc-blue-d); font-weight: 500; padding: 6px 10px; border-radius: 999px; }
+.lecturer .lc-back:hover { background: var(--lc-blue-tint); }
+.lecturer .lc-wordmark { font-size: 24px; font-weight: 500; letter-spacing: -.5px; }
+.lecturer .lc-c0 { color: var(--lc-blue); } .lecturer .lc-c1 { color: var(--lc-red); }
+.lecturer .lc-c2 { color: var(--lc-yellow); } .lecturer .lc-c3 { color: #34a853; }
+.lecturer .lc-role {
+  padding: 2px 10px; border-radius: 999px; background: var(--lc-blue-tint); color: var(--lc-blue-d);
+  font-weight: 500; font-size: 12px;
+}
+.lecturer .lc-picker {
+  display: flex; align-items: center; gap: 8px; padding: 4px 8px 4px 4px;
+  border: 1px solid var(--lc-line); border-radius: 999px;
+}
+.lecturer .lc-picker select {
+  border: 0; background: transparent; padding: 6px 4px; font-weight: 500; max-width: 220px; cursor: pointer;
+}
+.lecturer .lc-avatar {
+  width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-weight: 500; color: #fff;
+}
+.lecturer .lc-avatar.lc-tone-0 { background: var(--lc-blue-d); }
+.lecturer .lc-avatar.lc-tone-1 { background: var(--lc-green-d); }
+.lecturer .lc-avatar.lc-tone-2 { background: var(--lc-yellow-d); }
+.lecturer .lc-avatar.lc-tone-3 { background: var(--lc-red-d); }
+
+/* --- tabs --- */
+.lecturer .lc-tabs { display: flex; gap: 8px; padding: 0 24px; border-bottom: 1px solid var(--lc-line); }
+.lecturer .lc-tabs button {
+  background: none; border: 0; padding: 14px 16px; cursor: pointer; color: var(--lc-muted);
+  font-weight: 500; border-bottom: 3px solid transparent; margin-bottom: -1px;
+}
+.lecturer .lc-tabs button:hover { background: var(--lc-surface); }
+.lecturer .lc-tabs button.is-active { color: var(--lc-blue-d); border-bottom-color: var(--lc-blue-d); }
+
+.lecturer .lc-main { padding: 20px 24px 48px; max-width: 1280px; margin: 0 auto; }
+
+/* --- buttons and chips --- */
+.lecturer .lc-btn {
+  border-radius: 999px; padding: 8px 20px; font-weight: 500; cursor: pointer; border: 1px solid transparent; background: none;
+}
+.lecturer .lc-btn:disabled { opacity: .6; cursor: default; }
+.lecturer .lc-btn-primary { background: var(--lc-blue-d); color: #fff; }
+.lecturer .lc-btn-primary:hover:not(:disabled) { background: #1765cc; box-shadow: var(--lc-shadow); }
+.lecturer .lc-btn-outline { border-color: var(--lc-line); background: #fff; }
+.lecturer .lc-btn-outline:hover { background: var(--lc-surface); }
+.lecturer .lc-btn-text { color: var(--lc-blue-d); padding: 8px 12px; }
+.lecturer .lc-btn-text:hover:not(:disabled) { background: var(--lc-blue-tint); }
+.lecturer .lc-icon-btn {
+  width: 40px; height: 40px; display: grid; place-items: center; border: 0; border-radius: 50%;
+  background: none; color: var(--lc-muted); cursor: pointer;
+}
+.lecturer .lc-icon-btn:hover { background: var(--lc-surface); }
+.lecturer .lc-chip { display: inline-block; padding: 1px 8px; border-radius: 6px; font-size: 11px; font-weight: 500; vertical-align: middle; }
+.lecturer .lc-chip-view { background: var(--lc-yellow-tint); color: var(--lc-yellow-d); margin-left: auto; }
+.lecturer .lc-chip-moved { background: var(--lc-yellow-tint); color: var(--lc-yellow-d); margin-left: 4px; }
+.lecturer .lc-chip-cancelled { background: var(--lc-red-tint); color: var(--lc-red-d); margin-left: 4px; }
+
+/* --- toolbar and states --- */
+.lecturer .lc-toolbar { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-bottom: 16px; }
+.lecturer .lc-toolbar .lc-btn-outline { margin-right: 8px; }
+.lecturer .lc-range { font-size: 22px; font-weight: 400; margin-left: 8px; }
+.lecturer .lc-state { padding: 24px 0; color: var(--lc-muted); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.lecturer .lc-state-error { color: var(--lc-red-d); }
+.lecturer .lc-spinner {
+  width: 18px; height: 18px; border-radius: 50%; border: 3px solid var(--lc-blue);
+  border-right-color: var(--lc-red); border-bottom-color: var(--lc-yellow); border-left-color: #34a853;
+  animation: lc-spin 1s linear infinite;
+}
+@keyframes lc-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .lecturer .lc-spinner { animation-duration: 3s; } }
+
+/* --- week grid (view only) --- */
+.lecturer .lc-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
+.lecturer .lc-day { border: 1px solid var(--lc-line); border-radius: var(--lc-radius); background: #fff; min-height: 200px; overflow: hidden; }
+.lecturer .lc-day-head { display: flex; flex-direction: column; align-items: center; padding: 10px 0 6px; border-bottom: 1px solid var(--lc-line); background: var(--lc-surface); }
+.lecturer .lc-dow { font-size: 11px; font-weight: 500; color: var(--lc-muted); text-transform: uppercase; letter-spacing: .8px; }
+.lecturer .lc-dom { font-size: 22px; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%; }
+.lecturer .lc-day.is-today .lc-dow { color: var(--lc-blue-d); }
+.lecturer .lc-day.is-today .lc-dom { background: var(--lc-blue-d); color: #fff; }
+.lecturer .lc-day-body { padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+.lecturer .lc-none { color: var(--lc-muted); font-size: 12px; text-align: center; padding: 12px 0; }
+
+.lecturer .lc-slot { border-left: 4px solid; border-radius: 8px; padding: 8px 10px; }
+.lecturer .lc-slot p { overflow-wrap: anywhere; }
+.lecturer .lc-slot-time { font-size: 12px; font-weight: 500; }
+.lecturer .lc-slot-code { font-weight: 700; margin-top: 2px; }
+.lecturer .lc-slot-line { font-size: 12px; }
+.lecturer .lc-slot-room { font-size: 12px; margin-top: 4px; display: flex; align-items: center; gap: 4px; }
+.lecturer .lc-slot.is-cancelled { opacity: .65; }
+.lecturer .lc-slot.is-cancelled .lc-slot-time, .lecturer .lc-slot.is-cancelled .lc-slot-code { text-decoration: line-through; }
+.lecturer .lc-slot.lc-tone-0, .lecturer .lc-datebox.lc-tone-0 { background: var(--lc-blue-tint);   border-color: var(--lc-blue);   color: var(--lc-blue-ink); }
+.lecturer .lc-slot.lc-tone-1, .lecturer .lc-datebox.lc-tone-1 { background: var(--lc-green-tint);  border-color: var(--lc-green);  color: var(--lc-green-d); }
+.lecturer .lc-slot.lc-tone-2, .lecturer .lc-datebox.lc-tone-2 { background: var(--lc-yellow-tint); border-color: var(--lc-yellow); color: var(--lc-yellow-d); }
+.lecturer .lc-slot.lc-tone-3, .lecturer .lc-datebox.lc-tone-3 { background: var(--lc-red-tint);    border-color: var(--lc-red);    color: var(--lc-red-d); }
+
+/* --- reschedule list --- */
+.lecturer .lc-title { font-size: 22px; font-weight: 400; }
+.lecturer .lc-sub { color: var(--lc-muted); margin: 4px 0 16px; }
+.lecturer .lc-classes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.lecturer .lc-row {
+  display: flex; align-items: center; gap: 16px; padding: 12px 16px;
+  border: 1px solid var(--lc-line); border-radius: var(--lc-radius); background: #fff;
+}
+.lecturer .lc-datebox { width: 52px; flex: none; text-align: center; border-radius: 10px; padding: 6px 0; }
+.lecturer .lc-datebox-mon { display: block; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .6px; }
+.lecturer .lc-datebox-day { display: block; font-size: 22px; line-height: 1.1; font-weight: 500; }
+.lecturer .lc-info { flex: 1; min-width: 0; }
+.lecturer .lc-row-title { font-weight: 500; font-size: 15px; overflow-wrap: anywhere; }
+.lecturer .lc-row-meta { color: var(--lc-muted); margin-top: 2px; }
+
+/* --- dialog --- */
+.lecturer .lc-dialog {
+  border: 0; border-radius: 16px; padding: 24px; width: min(440px, calc(100vw - 32px));
+  box-shadow: 0 8px 28px rgba(60, 64, 67, .35); color: var(--lc-text); background: #fff;
+}
+.lecturer .lc-dialog::backdrop { background: rgba(32, 33, 36, .5); }
+.lecturer .lc-dialog h2 { font-size: 22px; font-weight: 400; margin-bottom: 8px; }
+.lecturer .lc-current { color: var(--lc-muted); margin-bottom: 16px; }
+.lecturer .lc-current strong { color: var(--lc-text); }
+.lecturer .lc-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; flex: 1; min-width: 0; }
+.lecturer .lc-field-row { display: flex; gap: 12px; }
+.lecturer .lc-field label { font-size: 12px; font-weight: 500; color: var(--lc-muted); }
+.lecturer .lc-optional { font-weight: 400; }
+.lecturer .lc-field input, .lecturer .lc-field textarea, .lecturer .lc-field select {
+  border: 1px solid var(--lc-line); border-radius: 8px; padding: 10px 12px; background: #fff; width: 100%;
+}
+.lecturer .lc-field textarea { resize: vertical; }
+.lecturer .lc-field input:hover, .lecturer .lc-field textarea:hover, .lecturer .lc-field select:hover { border-color: var(--lc-muted); }
+.lecturer .lc-field input:focus-visible, .lecturer .lc-field textarea:focus-visible, .lecturer .lc-field select:focus-visible {
+  outline: none; border-color: var(--lc-blue-d); box-shadow: 0 0 0 1px var(--lc-blue-d);
+}
+.lecturer .lc-end { margin: -4px 0 14px; color: var(--lc-muted); }
+.lecturer .lc-end strong { color: var(--lc-text); }
+.lecturer .lc-hint { font-size: 12px; color: var(--lc-muted); margin-top: 2px; }
+.lecturer .lc-form-error { background: var(--lc-red-tint); color: var(--lc-red-d); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; }
+.lecturer .lc-form-error ul { margin: 6px 0 0; padding-left: 18px; }
+.lecturer .lc-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+
+/* --- toast --- */
+.lecturer .lc-toast {
+  position: fixed; left: 24px; bottom: 24px; background: #323232; color: #fff; padding: 12px 20px;
+  border-radius: 8px; box-shadow: var(--lc-shadow); opacity: 0; transform: translateY(8px);
+  transition: opacity .2s, transform .2s; pointer-events: none;
+}
+.lecturer .lc-toast.is-shown { opacity: 1; transform: none; }
+
+/* --- small screens: the week becomes a vertical list of days --- */
+@media (max-width: 900px) {
+  .lecturer .lc-week { grid-template-columns: 1fr; }
+  .lecturer .lc-day { min-height: 0; display: flex; }
+  .lecturer .lc-day-head { flex: none; width: 72px; border-bottom: 0; border-right: 1px solid var(--lc-line); justify-content: flex-start; }
+  .lecturer .lc-day-body { flex: 1; min-width: 0; }
+  .lecturer .lc-none { text-align: left; padding: 4px 0; }
+}
+@media (max-width: 600px) {
+  .lecturer .lc-topbar, .lecturer .lc-tabs, .lecturer .lc-main { padding-left: 16px; padding-right: 16px; }
+  .lecturer .lc-picker select { max-width: 140px; }
+  .lecturer .lc-row { flex-wrap: wrap; }
+  .lecturer .lc-row .lc-btn { margin-left: 68px; }
+  .lecturer .lc-range { font-size: 18px; width: 100%; margin: 4px 0 0; }
+  .lecturer .lc-chip-view { margin-left: 0; }
+  .lecturer .lc-toast { left: 16px; right: 16px; }
+}
