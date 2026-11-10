@@ -66,6 +66,20 @@ Run [seed_lecturers.sql](seed_lecturers.sql) in the SQL Editor after creating th
 
 Rerunning updates the sample names while preserving existing lecturer UUIDs and linked accounts. The final query lists all 20 records for inspection.
 
+## Courses for APU1F2611CS(SE)
+
+Run [seed_courses.sql](seed_courses.sql) as `postgres` in the SQL Editor after `schema.sql` and `seed_lecturers.sql`. It creates the intake with one group if missing, then creates these course components, intake offerings, and Group 1 class sections:
+
+| Course code | Subject | Components | Lecturer | Duration of each component |
+| --- | --- | --- | --- | ---: |
+| CS101-PYP | Introduction to Programming | Lecture + lab | LEC001 - Ahmad Hakim | 120 minutes |
+| CS101-IN | Introduction to Networking | Lecture + lab | LEC002 - Siti Aisyah | 120 minutes |
+| CS101-ISE | Introduction to Software Engineering | Lecture + tutorial | LEC003 - Muhammad Farhan | 120 minutes |
+
+Both components of each subject use the same lecturer. Lectures and the tutorial require a classroom; labs require a lab. There are six course rows because teaching type is part of the course identity, with six intake offerings and six Group 1 sections. Dated class sessions are scheduled later.
+
+The script is atomic, uses no temporary tables, and can be rerun while preserving existing course/offering/section UUIDs. Rerunning refreshes the listed course names/durations and the target intake's lecturer and room-type assignments. A missing lecturer or a conflicting duration protected by existing sessions causes rollback. The final query lists all six components for inspection.
+
 ## Sample students and intakes
 
 Run [seed_students.sql](seed_students.sql) after creating or upgrading the schema (including the age migration). It creates or updates 18 intake codes and generates **1,000 unique student identities with 1,480 memberships**, arranged as the twelve cohorts below. Codes remain `TP000001` through `TP001000`, with distinct generated names and integer ages 18 through 25 (125 students per age).
@@ -132,7 +146,10 @@ npm install --prefix .sql-tools --no-save --package-lock=false @electric-sql/pgl
 $env:NODE_PATH = Join-Path (Get-Location).Path '.sql-tools/node_modules'
 node supabase/tests/schema.test.cjs
 node supabase/tests/memberships.test.cjs
+node supabase/tests/courses.test.cjs
 ```
+
+The course seed additionally passed 20 checks against the current schema, covering the six teaching components, 120-minute durations, paired lecturer assignments, room types, rollback on missing lecturers, preservation of IDs on rerun, and preservation of scheduled sessions.
 
 `tests/fixtures/legacy_schema.sql` is an archived test fixture used only to validate the upgrade. It is not a setup script for your project.
 
