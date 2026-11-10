@@ -125,6 +125,10 @@ You can then rerun `seed_students.sql` to recreate the sample students and their
 
 ## Scheduling work to add next
 
+Weekly demand is available through [migrations/202611100001_teaching_requirements.sql](migrations/202611100001_teaching_requirements.sql). Apply it **once after the base schema** (or the existing membership/age upgrades); do not rerun the initial schema. Both new and existing databases need this additional migration. It adds `teaching_plans`, `teaching_occurrences`, an optional occurrence link on `class_sessions`, and the `teaching_occurrence_details` view. Existing data is retained. See [setup and usage](../docs/backend/weekly-teaching-plans.md).
+
+Create a plan for each lecture/lab section with its first Monday, number of weeks, and occurrences per week. Plan insertion creates required lessons without assigning times or rooms. The SQL Editor and trusted server role can maintain these records; application users retain read-only access. No hosted migration or production teaching-plan data has been applied by this task.
+
 The schema does **not yet reject overlapping bookings or unsuitable/undersized rooms**. It also does not automatically insert change-history rows. The next step is a trusted scheduling operation that checks room, lecturer, and student availability across **both** session tables and **all** student intake memberships, handles simultaneous requests, and saves the booking and history together. Derive class rosters from matching `student_intakes.intake_id` and `group_number` rather than fields on `students`.
 
 For that reason, this initial script grants app users **read access only**, including users represented in `admins`. Use the SQL Editor for initial data entry. Add narrowly scoped, authorized scheduling functions and admin operations before enabling app writes. A trusted server using `service_role` bypasses RLS and must perform its own authorization; never put that key in the browser.
@@ -147,9 +151,12 @@ $env:NODE_PATH = Join-Path (Get-Location).Path '.sql-tools/node_modules'
 node supabase/tests/schema.test.cjs
 node supabase/tests/memberships.test.cjs
 node supabase/tests/courses.test.cjs
+node supabase/tests/teaching-requirements.test.cjs
 ```
 
 The course seed additionally passed 20 checks against the current schema, covering the six teaching components, 120-minute durations, paired lecturer assignments, room types, rollback on missing lecturers, preservation of IDs on rerun, and preservation of scheduled sessions.
+
+The teaching-requirement migration passed 51 additional checks covering weekly expansion, stable identities, repeated materialization, period boundaries, cancellation, make-up demand, booking linkage, timezone week mapping, preserved legacy data, protected teaching metadata, and role-based access. All four suites passed together during step 2 verification (201 database checks total). This remains local PostgreSQL verification with mocked Auth, not a hosted deployment or concurrent-transaction stress test.
 
 `tests/fixtures/legacy_schema.sql` is an archived test fixture used only to validate the upgrade. It is not a setup script for your project.
 

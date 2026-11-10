@@ -16,6 +16,20 @@ assumptions:
     verification: The browser showed backend online and configuration loaded; clicking Test connection returned setup-needed instructions. Add local credentials and use the menu to settle this claim. Owner-mock discovery was skipped because this CLI does not support postman status; the stand-in was authored from vendor documentation. Orbit discovery was unavailable due to DNS resolution failure.
     source: Config/config.json; .env.example; backend/app/database.py; supabase/schema.sql
     updated_at: "2026-11-08"
+  - id: weekly-demand-pagination
+    status: supported
+    claim: The weekly-demand reader can request filtered view rows using limit and offset and collect pages until an empty response under the documented PostgREST contract.
+    reason: PostgREST documents limit/offset query parameters. The real reader was exercised against a synthetic HTTP provider with a row cap smaller than requested, and retained all returned requirements without duplication.
+    verification: On 2026-11-10, the 16 teaching-requirement backend tests passed, including real HTTP pagination, target-week and outstanding-demand filters, moved requirements, malformed rows, missing view, duplicate pages, and timeout handling. This was a temporary HTTP test server, not a Postman CLI simulation run; the CLI is unavailable and the existing CLI mock still models only the rooms probe. Owner-mock discovery was not performed.
+    source: https://docs.postgrest.org/en/stable/references/api/pagination_count.html; backend/app/scheduling/requirements.py; backend/tests/test_teaching_requirements.py; docs/backend/weekly-teaching-plans.md
+    updated_at: "2026-11-10"
+  - id: hosted-weekly-demand-view
+    status: unknown
+    claim: The intended hosted project has the teaching-requirement migration applied and exposes teaching_occurrence_details to the server key through its Data API.
+    reason: The migration and access rules have been tested only in local PostgreSQL. The hosted project and Data API schema cache have not been inspected or changed by this task.
+    verification: On 2026-11-10, verified recurrence and access locally using PGlite with minimal mocked Supabase Auth. No hosted calls were made. Apply the migration, enter real teaching periods, and verify the authorized reader against the intended project before relying on live results.
+    source: supabase/migrations/202611100001_teaching_requirements.sql; supabase/tests/teaching-requirements.test.cjs; docs/backend/weekly-teaching-plans.md
+    updated_at: "2026-11-10"
 fingerprints:
   - id: initial-mvp
     date: "2026-11-08"

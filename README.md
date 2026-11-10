@@ -12,7 +12,7 @@ backend/
   app/config.py       Startup configuration validation
   app/database.py     Read-only Supabase connectivity check
   app/main.py         HTTP endpoints and built frontend serving
-  app/scheduling/     Configured teaching calendar; generation comes later
+  app/scheduling/     Teaching calendar and database-backed weekly requirements
   tests/              Backend integration checks
 docs/backend/         Backend decisions, implementation notes and progress
 frontend/
@@ -81,6 +81,14 @@ Classes may start at any time, with no fixed start-time interval or mandatory br
 `TeachingCalendar` in `backend/app/scheduling/calendar.py` accepts timezone-aware start/end timestamps and checks calendar eligibility. FastAPI initializes it as `app.state.teaching_calendar`. It does not yet check resource conflicts or generate schedules. Install the updated backend requirements for the timezone data needed on Windows.
 
 See [backend progress and decisions](docs/backend/agents.md), [calendar details](docs/backend/scheduling-calendar.md), and the [development checklist](task_hayden.md).
+
+## Repeating teaching requirements
+
+Apply [the teaching-requirement migration](supabase/migrations/202611100001_teaching_requirements.sql) once after the existing database setup. It adds weekly plans for class sections and creates stable occurrences for a specified number of weeks. Lecture and lab sections can have separate plans, durations, and lecturers. Existing bookings are preserved without guessing which requirement they belong to.
+
+The internal `load_weekly_requirements` function reads the selected target week's requirements from `teaching_occurrence_details`, including explicit make-up requirements. It can return only lessons still needing placement. No schedule-generation or plan-management API is introduced in this step.
+
+See [teaching-plan setup and behavior](docs/backend/weekly-teaching-plans.md). The migration is verified locally; applying it to a hosted project and entering actual teaching periods remain setup actions.
 
 ## API contract
 

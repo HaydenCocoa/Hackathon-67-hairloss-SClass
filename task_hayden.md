@@ -38,31 +38,46 @@ Implementation and verification: [Teaching calendar](docs/backend/scheduling-cal
 
 ## 2. Describe which classes must happen
 
-- [ ] Add a structure representing required teaching occurrences.
-- [ ] Identify each occurrence by its section, teaching week, and occurrence number.
-- [ ] Derive the duration from the linked course.
-- [ ] Define which weeks require each occurrence and how many occurrences are required per week.
-- [ ] Give each occurrence a unique identity to prevent duplicate scheduling.
-- [ ] Preserve that identity when rescheduling an occurrence into another week.
-- [ ] Track deliberate cancellation so generation does not recreate a cancelled lesson automatically.
-- [ ] Distinguish the occurrence's original teaching requirement from its actual scheduled date.
+**Status:** core weekly-recurrence requirements implemented locally on 10 November 2026; hosted migration is pending. See [implemented weekly teaching plans](docs/backend/weekly-teaching-plans.md) and the [original requirements discussion](docs/backend/teaching-requirements.md). Additional proposals below remain under review.
+
+Additional database proposals are under review, not implemented. See [offering end dates and system-defined room suitability](docs/backend/offering-end-dates-and-room-policy.md).
+
+- [ ] Confirm the course-offering end date's inclusive local-date semantics, its relationship to teaching-plan bounds, and whether make-up classes require an explicit extension.
+- [ ] Obtain real offering end dates and define a safe backfill/update policy; do not infer them from intake codes or silently invalidate existing bookings.
+- [ ] Confirm a system room-compatibility policy before removing `class_sections.required_room_type`; update later loading, validation, candidate generation, seeds, and views together.
+- [ ] Keep automatic public-holiday and semester-break handling deferred; continue respecting configured hours and explicit closures.
+
+- [x] Maintain recurring teaching plans in the database, as confirmed by the user.
+- [x] Resolve teaching weeks from each section's first Monday and week count; starts can differ across sections/intakes.
+- [x] Automatically materialize required teaching occurrences when a plan is added.
+- [x] Identify each occurrence by its plan, original week, occurrence number, and stable UUID.
+- [x] Derive duration and teaching type from the linked course.
+- [x] Define the period length and number of occurrences per week.
+- [x] Prevent duplicate requirements through unique constraints and repeatable materialization.
+- [x] Preserve identity and source week when moving an occurrence to another target week.
+- [x] Keep deliberate cancellations cancelled across repeated expansion; make-up demand is explicitly reopened.
+- [x] Link bookings to occurrences without guessing links for existing bookings.
+- [x] Read all or only outstanding weekly requirements through an internal paginated backend function.
+- [x] Verify recurrence, lifecycle, access rules, and database-reader behavior locally.
 
 Example: `Programming Lab / Group 1 / Week 3 / Occurrence 1`.
 
 **Complete when:** the backend can list exactly which occurrences require scheduling for a selected week, including replacements moved into that week, without duplicating existing or cancelled occurrences.
 
-## 3. Prepare a small, complete development dataset
+## 3. Use the existing scheduling dataset
 
-- [ ] Include rooms, lecturers, students, and intake/group memberships.
-- [ ] Include courses, course offerings, class sections, and required teaching occurrences.
-- [ ] Include at least one scarce lab and one undersized room.
-- [ ] Include students who belong to multiple intakes.
-- [ ] Include an existing meeting and a fixed reservation.
-- [ ] Include a case with no possible valid placement.
+**Status:** complete for the initial MVP on 10 November 2026, based on the user's confirmation that the data is settled in the database. No additional runtime code or database changes are required for this data-preparation milestone. See [dataset readiness and scope](docs/backend/scheduling-dataset.md).
 
-Room and student records alone are insufficient to generate a timetable. The dataset must describe the teaching requirements and their relationships.
+- [x] Use the existing rooms, lecturers, students, and intake/group memberships.
+- [x] Use the database's courses, offerings, sections, and weekly teaching requirements.
+- [x] Retain room capacity, type, and active status as inputs for later availability checks.
+- [x] Preserve all student intake memberships for later cross-intake conflict checking.
+- [x] Use existing class bookings/reservations when present; an empty booking calendar is valid for initial generation.
+- Meeting fixtures and deliberately impossible-arrangement fixtures are deferred, as requested. Artificial room-scarcity or undersized-room stress fixtures are not needed to block this first runnable path.
 
-**Complete when:** a small week can be scheduled using only the supplied dataset and explicit calendar rules, with no manual assumptions.
+Dataset readiness is user-confirmed, not an independent live database audit. No seed scripts were rerun, no sample records were inserted, and no hosted data was queried or changed during this step.
+
+**Complete when:** the existing database is accepted as the initial source of scheduling inputs. Loading and validating the actual data is step 4; generating a timetable is step 7.
 
 ## 4. Build the scheduling-data loader
 

@@ -15,5 +15,6 @@ node_modules/
 frontend/dist/
 *.log
 .sql-tools/
+.python-tools/
 .DS_Store
 .vscode/
