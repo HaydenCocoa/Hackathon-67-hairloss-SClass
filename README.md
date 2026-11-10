@@ -12,7 +12,9 @@ backend/
   app/config.py       Startup configuration validation
   app/database.py     Read-only Supabase connectivity check
   app/main.py         HTTP endpoints and built frontend serving
+  app/scheduling/     Configured teaching calendar; generation comes later
   tests/              Backend integration checks
+docs/backend/         Backend decisions, implementation notes and progress
 frontend/
   src/                Vue main menu, styles, HTTP client
   vite.config.js      Development proxy to FastAPI
@@ -65,10 +67,20 @@ Open **http://127.0.0.1:8000**. FastAPI serves the compiled Vue app and API from
 
 ## Configuration and preferences
 
-- `Config/config.json` is required at backend startup and remains tracked by Git. It holds app branding, environment label, allowed development origins, Supabase environment variable names, check table and timeout. Invalid/missing settings stop startup with a validation error. Restart the backend after edits.
+- `Config/config.json` is required at backend startup and remains tracked by Git. It holds app branding, environment label, allowed development origins, Supabase environment variable names, check table, timeout, and scheduling calendar rules. Invalid/missing settings stop startup with a validation error. Restart the backend after edits.
 - `.env` contains the actual Supabase URL and key. Existing environment variables take precedence. `.env` is ignored; `.env.example` is tracked. Never store keys in tracked configuration or `VITE_*` variables. The browser only receives the three public fields under `app`.
 - `Config/preference.json` is an ignored `{}` placeholder. It is deliberately not read, written, or exposed by the app. Git clones will not contain it; future preference support can create it when needed.
 - Only the compiled index and assets are served. The Config directory and `.env` are not public web files.
+
+## Teaching calendar
+
+The `scheduling` section of `Config/config.json` defines the timezone, weekday opening hours, and optional `closed_dates` (`YYYY-MM-DD`). Initial hours are Monday–Friday, **08:30–18:00**, in `Asia/Kuala_Lumpur`. Omitted weekdays are closed; change or add weekday entries to configure teaching days and different daily hours. Opening and closing times use 24-hour `HH:MM` format, with opening earlier than closing on the same day.
+
+Classes may start at any time, with no fixed start-time interval or mandatory breaks. The full positive-duration class must fit inside one opening window. For example, 09:17–10:47 is permitted, while 17:00–18:30 is outside the initial hours. An explicit closed date overrides weekday opening hours; no public holidays are imported automatically.
+
+`TeachingCalendar` in `backend/app/scheduling/calendar.py` accepts timezone-aware start/end timestamps and checks calendar eligibility. FastAPI initializes it as `app.state.teaching_calendar`. It does not yet check resource conflicts or generate schedules. Install the updated backend requirements for the timezone data needed on Windows.
+
+See [backend progress and decisions](docs/backend/agents.md), [calendar details](docs/backend/scheduling-calendar.md), and the [development checklist](task_hayden.md).
 
 ## API contract
 

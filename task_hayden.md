@@ -8,6 +8,8 @@ Complete the core scheduling workflow before building the remaining frontend, no
 
 Source: [Notes / Hackathon](https://app.notion.com/p/4117da63706d807095f2fbdab3321a17), last edited 9 November 2026.
 
+Backend decisions, implementation details, verification, and current status are recorded in [docs/backend/agents.md](docs/backend/agents.md).
+
 ## Initial scope
 
 - Generate one teaching week at a time.
@@ -19,13 +21,18 @@ Source: [Notes / Hackathon](https://app.notion.com/p/4117da63706d807095f2fbdab33
 
 ## 1. Define the scheduling rules
 
-- [ ] Define permitted teaching days and opening hours.
-- [ ] Define permitted start times or the start-time interval.
-- [ ] Define holidays, required breaks, and any travel time between classes.
-- [ ] Interpret the teaching calendar using `Asia/Kuala_Lumpur` and store booking timestamps consistently as timezone-aware values.
-- [ ] Define initial availability as being within permitted hours and having no conflicting class, meeting, or reservation.
-- [ ] Keep personal availability preferences outside the initial scope unless explicitly added as input.
-- [ ] Store scheduling rules as explicit configuration rather than hidden assumptions in the algorithm.
+- [x] Configure teaching weekdays and opening hours in `Config/config.json`: Monday–Friday, 08:30–18:00.
+- [x] Accept any start time whose full class duration fits within opening hours; no fixed start-time interval.
+- [x] Remove mandatory breaks and travel-time restrictions from the requirements, as requested on 10 November 2026.
+- [x] Support explicit holiday/closure dates through `closed_dates`, initially empty.
+- [x] Interpret the teaching calendar using `Asia/Kuala_Lumpur` and require timezone-aware booking timestamps. Persistence is implemented in a later step.
+- [x] Define full availability as calendar eligibility plus the absence of conflicting classes, meetings, or reservations. Only calendar eligibility is implemented in step 1.
+- [x] Keep personal availability preferences outside the initial scope unless explicitly added as input.
+- [x] Validate calendar configuration at startup and initialize a reusable teaching-calendar helper.
+
+Implementation and verification: [Teaching calendar](docs/backend/scheduling-calendar.md).
+
+**Status:** complete on 10 November 2026. Backend verification: 43 passed, 1 optional simulation test skipped.
 
 **Complete when:** calendar and availability rules are documented and configurable, and the engine can determine whether a proposed interval is inside the permitted teaching calendar.
 
@@ -77,7 +84,7 @@ Room and student records alone are insufficient to generate a timetable. The dat
 | Lecturers | Assigned lecturer for each section |
 | Rooms | Type, capacity, and active status |
 | Existing bookings | Classes, meetings, and reservations |
-| Calendar rules | Permitted dates, hours, and breaks |
+| Calendar rules | Permitted dates, hours, and explicit closures; unrestricted start times |
 
 **Complete when:** the engine receives a validated snapshot containing all information required to evaluate placements.
 
@@ -88,19 +95,19 @@ Room and student records alone are insufficient to generate a timetable. The dat
 - [ ] Check student overlaps across all intake memberships and meeting attendance.
 - [ ] Check room overlaps across classes, meetings, and reservations.
 - [ ] Check room capacity, required type, and active status.
-- [ ] Check the full duration against teaching hours and required breaks.
+- [ ] Check the full duration against teaching hours and explicit closures; apply no break restrictions.
 - [ ] Ignore cancelled bookings when determining occupied time.
 - [ ] Exclude the occurrence's original placement when validating a reschedule.
-- [ ] Use half-open intervals, such as `[10:00, 11:30)`, so adjacent classes do not overlap unless a required break makes the placement invalid.
+- [ ] Use half-open intervals, such as `[10:00, 11:30)`, so adjacent classes do not overlap.
 - [ ] Return structured rejection reasons such as `ROOM_TOO_SMALL`, `STUDENT_CONFLICT`, or `LECTURER_CONFLICT`.
 
 **Complete when:** every proposed booking receives a clear valid/invalid result with specific reasons.
 
 ## 6. Generate candidate placements
 
-- [ ] Calculate permitted start times for each occurrence.
+- [ ] Calculate feasible start-time ranges for each occurrence without imposing a fixed start-time grid.
 - [ ] Filter rooms by active status, required type, and sufficient capacity.
-- [ ] Preserve exact course durations rather than rounding them to the start-time interval.
+- [ ] Preserve exact course durations and do not round starts to preset intervals.
 - [ ] Remove placements that conflict with calendar rules or fixed bookings.
 - [ ] Return a clear explanation when an occurrence has no candidates.
 - [ ] Keep the scheduling horizon explicit so failure means no candidate within that horizon and the supplied rules.
@@ -110,7 +117,7 @@ Room and student records alone are insufficient to generate a timetable. The dat
 ## 7. Implement CP-SAT generation for feasibility
 
 - [ ] Build the scheduling model using Google OR-Tools CP-SAT.
-- [ ] Represent solver time using integer minutes.
+- [ ] Choose integer solver time units with explicit precision, consistent with unrestricted start times; do not introduce preset teaching slots.
 - [ ] Select exactly one placement per required occurrence.
 - [ ] Enforce lecturer, student, and room conflicts between newly generated classes.
 - [ ] Enforce conflicts against existing bookings and reservations.
@@ -127,7 +134,7 @@ Individually valid candidates can still conflict with one another. The solver mu
 
 ## 8. Add timetable quality objectives
 
-- [ ] Measure idle minutes between each student's first and last class per day, preserving required breaks.
+- [ ] Measure idle minutes between each student's first and last class per day; no mandatory breaks apply.
 - [ ] Make reducing total student waiting time the first optimization objective.
 - [ ] Add lecturer gap reduction as a lower-priority objective.
 - [ ] Add room utilization as a further preference.

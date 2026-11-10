@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import AppSettings, PROJECT_ROOT, Settings, load_settings
 from .database import DatabaseHealth, check_database
+from .scheduling.calendar import TeachingCalendar
 from .student import create_student_router
 
 
@@ -27,6 +28,7 @@ def create_app(settings: Settings | None = None, frontend_dist: Path | None = No
             yield
 
     app = FastAPI(title=f"{settings.app.name} API", version="0.1.0", lifespan=lifespan)
+    app.state.teaching_calendar = TeachingCalendar(settings.scheduling)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.server.cors_origins,

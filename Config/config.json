@@ -12,5 +12,16 @@
     "key_env": "SUPABASE_KEY",
     "healthcheck_table": "rooms",
     "timeout_seconds": 8
+  },
+  "scheduling": {
+    "timezone": "Asia/Kuala_Lumpur",
+    "opening_hours": {
+      "monday": {"opens_at": "08:30", "closes_at": "18:00"},
+      "tuesday": {"opens_at": "08:30", "closes_at": "18:00"},
+      "wednesday": {"opens_at": "08:30", "closes_at": "18:00"},
+      "thursday": {"opens_at": "08:30", "closes_at": "18:00"},
+      "friday": {"opens_at": "08:30", "closes_at": "18:00"}
+    },
+    "closed_dates": []
   }
 }
