@@ -2,13 +2,16 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { getJson } from './api'
 import StudentPage from './student/StudentPage.vue'
+import LecturerPage from './lecturer/LecturerPage.vue'
 
-// Simple hash routes: #/student opens the Student Page.
+// Simple hash routes: #/student opens the Student Page, #/lecturer opens the Lecturer Page.
 const route = ref(window.location.hash)
 window.addEventListener('hashchange', () => { route.value = window.location.hash })
 const isStudentPage = computed(() => route.value.startsWith('#/student'))
-watch(isStudentPage, (student) => {
-  document.title = `${config.value?.name || 'SClass'} · ${student ? 'Student timetable' : 'Main menu'}`
+const isLecturerPage = computed(() => route.value.startsWith('#/lecturer'))
+const pageName = computed(() => isStudentPage.value ? 'Student timetable' : isLecturerPage.value ? 'Lecturer timetable' : 'Main menu')
+watch(pageName, (name) => {
+  document.title = `${config.value?.name || 'SClass'} · ${name}`
 })
 
 const config = ref(null)
@@ -32,7 +35,7 @@ async function loadApp() {
   backend.value = health.status === 'fulfilled' && health.value.status === 'ok' ? 'online' : 'offline'
   if (settings.status === 'fulfilled') {
     config.value = settings.value
-    document.title = `${settings.value.name} · ${isStudentPage.value ? 'Student timetable' : 'Main menu'}`
+    document.title = `${settings.value.name} · ${pageName.value}`
   } else {
     configError.value = true
   }
@@ -54,12 +57,14 @@ onMounted(loadApp)
 
 <template>
   <StudentPage v-if="isStudentPage" />
+  <LecturerPage v-else-if="isLecturerPage" :app-name="config?.name || 'SClass'" />
   <div v-else class="app-shell">
     <aside class="sidebar">
       <a class="brand" href="/" aria-label="SClass home"><span class="brand-icon">S<span>•</span></span>{{ config?.name || 'SClass' }}</a>
       <p class="nav-label">WORKSPACE</p>
       <a class="nav-item active" href="#main" aria-current="page"><span aria-hidden="true">▦</span> Main menu</a>
       <a class="nav-item" href="#/student"><span aria-hidden="true">▤</span> Student timetable</a>
+      <a class="nav-item" href="#/lecturer"><span aria-hidden="true">▥</span> Lecturer timetable</a>
       <div class="sidebar-note"><span class="small-dot"></span> A little structure.<br />More room to learn.</div>
       <div class="sidebar-footer">SCLASS <span> / </span> MVP 0.1</div>
     </aside>
