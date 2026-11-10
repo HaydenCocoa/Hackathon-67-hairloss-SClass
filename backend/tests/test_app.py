@@ -155,3 +155,26 @@ def test_postman_simulation(settings, monkeypatch):
             response = client.get("/api/health/database")
             assert response.status_code == (200 if expected == "connected" else 503)
             assert response.json()["status"] == expected
+
+
+def test_admin_data_routes_require_authenticated_admin(settings):
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/api/admin/intakes")
+        assert response.status_code == 401
+        assert "administrator" in response.json()["detail"].lower()
+
+
+def test_admin_dev_bypass_is_off_by_default(settings, monkeypatch):
+    monkeypatch.delenv("ADMIN_DEV_BYPASS", raising=False)
+    with TestClient(create_app(settings)) as client:
+        assert client.get("/api/admin/dev-bypass").json() == {"enabled": False}
+
+
+def test_admin_dev_bypass_only_in_development(settings, monkeypatch):
+    monkeypatch.setenv("ADMIN_DEV_BYPASS", "1")
+    settings.app.environment = "development"
+    with TestClient(create_app(settings)) as client:
+        assert client.get("/api/admin/dev-bypass").json() == {"enabled": True}
+    settings.app.environment = "production"
+    with TestClient(create_app(settings)) as client:
+        assert client.get("/api/admin/dev-bypass").json() == {"enabled": False}

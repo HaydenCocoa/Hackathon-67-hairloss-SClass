@@ -108,3 +108,8 @@ Remove-Item Env:SUPABASE_SIMULATION_URL
 ```
 
 The optional simulation uses only synthetic credentials, models an empty table and rejected API key, and never connects to Supabase. Stop it with Ctrl+C. Provider docs: [Supabase Data API](https://supabase.com/docs/guides/api), [API keys](https://supabase.com/docs/guides/getting-started/api-keys), [FastAPI static files](https://fastapi.tiangolo.com/tutorial/static-files/), [Vite](https://vite.dev/guide/).
+
+
+## Admin portal
+
+The administrator portal provides intake CRUD and a read-only university timetable viewer. See [Admin portal setup](docs/admin-portal.md) for administrator registration, API routes, and usage.
