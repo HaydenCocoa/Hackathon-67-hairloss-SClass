@@ -17,7 +17,8 @@ LOGGER = logging.getLogger("sclass.scheduling")
 REQUEST_ID: ContextVar[str] = ContextVar("scheduling_request_id", default="-")
 _SETUP_LOCK = Lock()
 _FIELDS = {"http_status", "provider_status", "provider_code", "rpc", "stage", "duration_ms", "code",
-           "pending_count", "placement_count", "row_count", "status", "exception_type", "frames"}
+           "pending_count", "placement_count", "row_count", "status", "exception_type", "frames", "saved_count"}
+TRACED_PATHS = {"/api/schedules/generate", "/api/schedules/save"}
 
 
 class TraceFormatter(logging.Formatter):
@@ -68,7 +69,7 @@ class SchedulingTraceMiddleware:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or scope.get("path") != "/api/schedules/generate":
+        if scope["type"] != "http" or scope.get("path") not in TRACED_PATHS:
             return await self.app(scope, receive, send)
         # Generate locally rather than accepting a caller-supplied log value.
         token = REQUEST_ID.set(uuid4().hex)

@@ -207,16 +207,18 @@ Verification status on 11 November: code and HTTP-provider fixtures were updated
 
 ## 10. Implement safe timetable saving
 
-- [ ] Add an authorized operation to commit a generated preview.
-- [ ] Verify the caller's permission to perform the scheduling operation.
-- [ ] Detect stale previews and recheck current data and availability within the transaction.
-- [ ] Use a consistent locking strategy for all relevant booking and roster changes.
-- [ ] Save assignments and relevant audit information together in one database transaction.
-- [ ] Prevent duplicate bookings for the same teaching occurrence.
-- [ ] Handle retries safely so repeated submissions do not duplicate assignments.
-- [ ] Reject a failed commit without leaving a partially saved timetable.
+- [x] Add an operation to commit a generated preview: `POST /api/schedules/save` and a Save button with two-step confirmation on the development page.
+- [ ] Verify the caller's permission to perform the scheduling operation. **Deferred until the login page exists**; meanwhile admin-only via the development/localhost checks.
+- [x] Detect stale previews (scope-bound revision must match) and recheck current data and availability before writing. Not inside one database transaction (accepted for the hackathon).
+- [ ] Use a consistent locking strategy for all relevant booking and roster changes. Partial: saves and previews share one per-process slot, and the insert takes the existing advisory lock. Other writers (dashboard, lecturer reschedule endpoint) do not follow the save checks.
+- [ ] Save assignments and relevant audit information together in one database transaction. Assignments: done (one insert). **Audit deferred until login exists.**
+- [x] Prevent duplicate bookings for the same teaching occurrence (unique occurrence constraint; reported as `ALREADY_SAVED`).
+- [x] Handle retries safely so repeated submissions do not duplicate assignments (a retry is `PREVIEW_STALE`; the unique constraint also blocks it).
+- [x] Reject a failed commit without leaving a partially saved timetable (single bulk insert).
 
 For the hackathon dataset, a shared scheduling lock is a reasonable starting design, provided all relevant mutations follow the same rules.
+
+Accepted 11 November 2026: no stored draft (leaving the page loses the preview); admin only; reject stale previews and regenerate; backend recheck then one insert (not a database function); audit after login exists; whole preview only; viewing out of scope; no undo, with a double confirmation before saving. Implemented and verified locally on 11 November, not against hosted Supabase. See [timetable saving](docs/backend/timetable-saving.md).
 
 **Complete when:** simultaneous requests cannot double-book resources, retries cannot duplicate occurrences, and failed saves leave no partial timetable.
 

@@ -76,7 +76,7 @@ Non-validation errors have the shape `{"detail":{"code":"GENERATION_BUSY","messa
 
 The draft is returned directly without a database preview table, cache, or retrieval endpoint. It is a point-in-time result: another booking or roster change can make it stale immediately. The input revision supports later comparison but does not lock resources or authorize saving.
 
-Step 10 must define how a reviewed draft becomes a trusted commit request, through server-held or integrity-protected draft data and full transactional revalidation. A client-provided revision or assignment list alone is insufficient. Do not promise that the client can submit this response unchanged to a future save endpoint. No preview identifier with implied persistence is needed before a storage/lifetime design is chosen.
+**Update, 11 November 2026 (step 10):** saving is implemented as `POST /api/schedules/save`; see [timetable saving](timetable-saving.md). The user chose no stored draft: the page sends back the preview it shows, and the server trusts only each placement's occurrence, room and start. It re-reads the week, requires the same scope-bound revision, revalidates every class and their mutual clashes, then writes all rows in one insert. Leaving the page still discards an unsaved preview. Full database-transactional revalidation (a database function) was deliberately deferred; the remaining race with writers outside this backend is recorded there.
 
 ## Local access and test page
 
@@ -134,4 +134,4 @@ Remove-Item Env:NODE_PATH
 
 The QA service uses synthetic PostgreSQL output and isolated credentials. Week 2026-11-09 contains pending demand for example intake `00000000-0000-0000-0000-000000000001`, group 1; other selected weeks are modeled as empty. It never points to the hosted project. Stop this temporary service after testing. Without `SCHEDULING_UI_URL`, eleven DOM cases run and the served-page HTTP case is skipped.
 
-Completion: a caller can generate and inspect a valid complete draft through the API/page with accurate failure outcomes while actual bookings remain unchanged. Safe saving is step 10; quality optimization remains postponed.
+Completion: a caller can generate and inspect a valid complete draft through the API/page with accurate failure outcomes while actual bookings remain unchanged. Saving was added in step 10 ([timetable saving](timetable-saving.md)); quality optimization remains postponed.

@@ -116,13 +116,13 @@ Generate one occurrence or every pending occurrence from an existing snapshot. R
 
 Install updated backend requirements for OR-Tools. Configure `scheduling.solver` for search time (default 10 seconds), worker count (default 1), and random seed (default 0). Results distinguish complete solutions, proven infeasibility, unresolved search, invalid models, and an empty pending week. No partial timetable is returned as complete.
 
-This engine produces a feasibility draft. Quality objectives are postponed; step 9 now exposes local preview generation. Authorized booking writes remain step 10. No new database migration is required for these computation/API steps. See [solver setup, usage, statuses, and verification](docs/backend/cp-sat-scheduling.md).
+This engine produces a feasibility draft. Quality objectives are postponed; step 9 exposes local preview generation and step 10 saves a reviewed preview (local development; login-based authorization is deferred). No new database migration is required for these computation/API steps. See [solver setup, usage, statuses, and verification](docs/backend/cp-sat-scheduling.md).
 
 ## Scheduling test page
 
 With FastAPI running, open **http://127.0.0.1:8000/development/scheduling-test-hayden**. Select a Monday, enter the intake's database UUID and optionally a group number. Generate all pending classes for that intake, or only that group. The page sends a request to the same API and displays proposed classes in campus-local time, readable course/room labels, selected scope, solver outcome, diagnostics, and raw JSON. Other intakes' existing bookings remain fixed constraints. It works without building Vue.
 
-This is a read-only local-development tool: no bookings are saved and quality optimization is disabled. The API/page require `app.environment=development` and a direct localhost connection; remote/proxy access is rejected until authenticated access is implemented. Live generation requires configured Supabase access, the teaching-requirement migration/views, and source data. The direct reads are multiple requests, so step 10 must revalidate transactionally before saving. See [API contract, setup, and test evidence](docs/backend/schedule-preview-api.md).
+This is a local-development admin tool. Generating a preview saves nothing, and quality optimization is disabled. Previews are not stored: leaving or reloading the page discards them. After review, **Save timetable…** opens a two-step confirmation (summary, then a tick box before **Confirm save**). Saving rechecks the week against the database, rejects a stale or edited preview, and writes all classes to `class_sessions` in one insert. Saved classes are visible to students and lecturers immediately, and the page has no undo. The API/page require `app.environment=development` and a direct localhost connection; remote/proxy access is rejected until authenticated access is implemented. Live use requires configured Supabase access, the teaching-requirement migration/views, and source data. See [API contract, setup, and test evidence](docs/backend/schedule-preview-api.md) and [timetable saving](docs/backend/timetable-saving.md).
 
 Scheduling requests now have a displayed `X-Request-ID` and safe JSON traces in the backend terminal and ignored `logs/scheduling.log`. Restart the backend to load code changes, then watch with `Get-Content .\logs\scheduling.log -Tail 50 -Wait`. Direct backend database reads record the stage that succeeded or failed; see [scheduling logging and database-read diagnosis](docs/backend/scheduling-logging.md).
 
@@ -134,11 +134,12 @@ Scheduling requests now have a displayed `X-Request-ID` and safe JSON traces in 
 | `GET /api/config` | `200`: public `name`, `description`, `environment` |
 | `GET /api/health/database` | `200`: `connected`; `503`: `not_configured`, `error`, or `timeout` |
 | `POST /api/schedules/generate` | Development-only preview; required `week_start`, `intake_id` (UUID), optional positive integer `group_number`; no booking writes |
-| `GET /development/scheduling-test-hayden` | Development-only page for requesting and reviewing generated schedules |
+| `POST /api/schedules/save` | Development-only admin save of a reviewed preview: the same scope plus `snapshot_revision` and every placement's `occurrence_id`, `room_id`, `starts_at`. `201` saves all classes; stale, partial or edited previews are rejected and nothing is written |
+| `GET /development/scheduling-test-hayden` | Development-only page for generating, reviewing and saving schedules |
 | `GET /docs` | Interactive OpenAPI reference |
 | `GET /openapi.json` | Generated, reusable API contract |
 
-Database health results include `status`, a safe `message`, UTC `checked_at`, and `latency_ms` (populated on success). Missing credentials, rejected access, missing table, upstream failure, timeout and invalid responses have distinct safe messages. A successful health check verifies a read via the Supabase Data API. Scheduling previews expose the existing engine through a guarded development endpoint; administrator authentication, booking writes, and preference persistence remain future work.
+Database health results include `status`, a safe `message`, UTC `checked_at`, and `latency_ms` (populated on success). Missing credentials, rejected access, missing table, upstream failure, timeout and invalid responses have distinct safe messages. A successful health check verifies a read via the Supabase Data API. Scheduling previews and saving expose the existing engine through guarded development endpoints; administrator authentication, save auditing, and preference persistence remain future work.
 
 ## Verify
 

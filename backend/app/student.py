@@ -105,6 +105,18 @@ class SupabaseReadError(HTTPException):
         super().__init__(502, f"Supabase could not read '{table}' (HTTP {provider_status}).")
 
 
+class SupabaseWriteError(HTTPException):
+    """Safe insert failure. Keeps only the HTTP status and an allowlisted Postgres
+    error code for classification; never the provider message, details or hint."""
+
+    SAFE_CODES = {"23505", "23503", "23514", "P0001", "42501", "40001", "40P01"}
+
+    def __init__(self, table: str, provider_status: int, provider_code: str | None):
+        self.provider_status = provider_status
+        self.provider_code = provider_code if provider_code in self.SAFE_CODES else None
+        super().__init__(502, f"Supabase could not write '{table}' (HTTP {provider_status}).")
+
+
 class Supabase:
     def __init__(self, settings: SupabaseSettings, client: httpx.AsyncClient):
         self.url = os.getenv(settings.url_env, "").strip().rstrip("/")
@@ -135,6 +147,33 @@ class Supabase:
         if not isinstance(body, list):
             raise HTTPException(502, "Supabase returned an unexpected response.")
         return body
+
+    async def insert(self, table: str, rows: list[dict[str, Any]], returning: str) -> list[dict[str, Any]]:
+        """Bulk insert in ONE request. PostgREST runs it as a single statement,
+        so either every row is written or none is."""
+        try:
+            response = await self.client.post(
+                f"{self.url}/rest/v1/{table}", params=[("select", returning)], json=rows, timeout=self.timeout,
+                headers={**self.headers, "Content-Type": "application/json", "Prefer": "return=representation"},
+            )
+        except httpx.TimeoutException:
+            raise HTTPException(504, "Supabase timed out while saving.")
+        except httpx.RequestError:
+            raise HTTPException(502, "Could not reach Supabase. Check the project URL and network.")
+        if response.status_code != 201:
+            try:
+                code = response.json().get("code")
+            except (ValueError, AttributeError):
+                code = None
+            raise SupabaseWriteError(table, response.status_code, code if isinstance(code, str) else None)
+        try:
+            body = response.json()
+        except ValueError:
+            body = None
+        if not isinstance(body, list):
+            raise HTTPException(502, "Supabase returned an unexpected response.")
+        return body
+
 
 def in_list(values) -> str:
     # IDs come from our own database (UUIDs), so quoting is enough.

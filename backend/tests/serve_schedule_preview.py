@@ -84,6 +84,17 @@ def main():
             self.end_headers()
             self.wfile.write(json.dumps(rows).encode())
 
+        def do_POST(self):
+            # Step 10 save: accept a class_sessions bulk insert and echo ids. The
+            # synthetic data is NOT changed, so the same week can be saved again.
+            rows = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"[]")
+            created = [{"id": f"00000000-0000-0000-0000-{9000 + index:012d}", "occurrence_id": row["occurrence_id"]}
+                       for index, row in enumerate(rows)]
+            self.send_response(201 if urlsplit(self.path).path == "/rest/v1/class_sessions" else 404)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(created).encode())
+
         def log_message(self, *_):
             pass
 
