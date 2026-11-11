@@ -128,6 +128,8 @@ Scheduling requests now have a displayed `X-Request-ID` and safe JSON traces in 
 
 ## API contract
 
+Teammates calling the scheduling API should start with the [scheduling API quick guide](docs/backend/scheduling-api-guide.md). It has the request and response format, status values, errors and example calls.
+
 | Method / path | Result |
 | --- | --- |
 | `GET /api/health` | `200`: backend liveness, independent of Supabase |

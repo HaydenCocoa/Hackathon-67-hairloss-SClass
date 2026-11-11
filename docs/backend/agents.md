@@ -269,3 +269,10 @@ Historical discussion; superseded by the implementation record below after the u
 - Completion rests on the user's confirmation. This documentation-only task did not run the backend or database suites, query the hosted project, or apply any SQL. The user chose not to run the test suite in this session. The latest automated Step 2 results (16 focused reader, 59 full backend, 201 database checks) still predate the 11 November compatibility edit.
 - Deferred items are follow-ups, not blockers for Step 2: offering end dates, automatic holiday/semester-break handling, applying `202611100002_remove_required_room_type.sql` to the hosted database, adapting the legacy course seed and fresh setup, and updating the ERD.
 - Step 4's direct-read loader and the Step 9 preview that depends on it still need verification.
+
+## Teammate API guide — 11 November 2026
+
+- The user asked for scheduling API documentation that other team members can use. The existing [preview API record](schedule-preview-api.md) mixes the contract with design history and test evidence, so a short consumer-facing [scheduling API quick guide](scheduling-api-guide.md) was added. The README and the preview record link to it.
+- The guide covers how to run the endpoint locally, the request fields and rules, an illustrative response, `status` meanings, error codes with suggested handling, request-ID reporting, and what isn't available yet (saving, rescheduling, quality optimisation). Field names and error codes were checked against `backend/app/scheduling/preview.py`, `solver.py` and `loader.py`.
+- Example IDs, course and room labels are placeholders, not database records. Calling the API through the Vite dev proxy on port 5173 should pass the access checks (loopback Host, allowed Origin, no forwarding headers), but this has not been tested. The guide says so.
+- Documentation only. No code, configuration or database changed, and no tests were run.
