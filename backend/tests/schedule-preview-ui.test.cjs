@@ -3,7 +3,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { JSDOM } = require('jsdom');
+const { JSDOM, CookieJar } = require('jsdom');
 
 const assets = path.join(__dirname, '../app/scheduling/development');
 const html = fs.readFileSync(path.join(assets, 'index.html'), 'utf8').replace('__CAMPUS_TIMEZONE__', 'Asia/Kuala_Lumpur');
@@ -28,7 +28,7 @@ function result(status = 'OPTIMAL') {
 }
 
 function page(fetch) {
-  const dom = new JSDOM(html, { url: 'http://127.0.0.1:8000/development/scheduling-test-hayden', runScripts: 'outside-only' });
+  const dom = new JSDOM(html, { url: 'http://127.0.0.1:8000/admin/development/scheduling-test-hayden', runScripts: 'outside-only' });
   dom.window.fetch = fetch;
   dom.window.eval(script);
   dom.window.document.querySelector('#week-start').value = '2026-11-09';
@@ -305,16 +305,34 @@ test('save is not offered without a complete timetable', async () => {
   } finally { dom.window.close(); }
 });
 
-test('served page makes a real HTTP request and renders the real synthetic solver result', { skip: !process.env.SCHEDULING_UI_URL }, async () => {
-  const url = process.env.SCHEDULING_UI_URL;
-  const dom = await JSDOM.fromURL(url, {
-    resources: 'usable', runScripts: 'dangerously',
+// The served page needs an admin login: log in to the synthetic QA service
+// (fake Supabase Auth, never a hosted project) and reuse its session cookies.
+async function servedPage(url) {
+  const origin = new URL(url).origin;
+  const anonymous = await fetch(url, { redirect: 'manual' });
+  assert.equal(anonymous.status, 303);
+  assert.equal(anonymous.headers.get('location'), `/login?next=${new URL(url).pathname}`);
+  const login = await fetch(`${origin}/api/auth/login`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Origin: origin },
+    body: JSON.stringify({ email: 'qa-admin@example.test', password: 'qa-password-synthetic' }),
+  });
+  assert.equal(login.status, 200, await login.clone().text());
+  const cookies = login.headers.getSetCookie();
+  const cookieJar = new CookieJar();
+  for (const value of cookies) cookieJar.setCookieSync(value, origin);
+  const cookie = cookies.map(value => value.split(';')[0]).join('; ');
+  return JSDOM.fromURL(url, {
+    resources: 'usable', runScripts: 'dangerously', cookieJar,
     beforeParse(window) {
       window.fetch = (target, options) => fetch(new URL(target, url), {
-        ...options, headers: { ...options.headers, Origin: new URL(url).origin },
+        ...options, headers: { ...options.headers, Origin: origin, Cookie: cookie },
       });
     },
   });
+}
+
+test('served page makes a real HTTP request and renders the real synthetic solver result', { skip: !process.env.SCHEDULING_UI_URL }, async () => {
+  const dom = await servedPage(process.env.SCHEDULING_UI_URL);
   try {
     if (dom.window.document.readyState !== 'complete') await new Promise(resolve => dom.window.addEventListener('load', resolve, { once: true }));
     dom.window.document.querySelector('#week-start').value = '2026-11-09';
@@ -341,15 +359,7 @@ test('served page makes a real HTTP request and renders the real synthetic solve
 });
 
 test('served page saves a reviewed preview through the real backend', { skip: !process.env.SCHEDULING_UI_URL }, async () => {
-  const url = process.env.SCHEDULING_UI_URL;
-  const dom = await JSDOM.fromURL(url, {
-    resources: 'usable', runScripts: 'dangerously',
-    beforeParse(window) {
-      window.fetch = (target, options) => fetch(new URL(target, url), {
-        ...options, headers: { ...options.headers, Origin: new URL(url).origin },
-      });
-    },
-  });
+  const dom = await servedPage(process.env.SCHEDULING_UI_URL);
   try {
     if (dom.window.document.readyState !== 'complete') await new Promise(resolve => dom.window.addEventListener('load', resolve, { once: true }));
     const document = dom.window.document;

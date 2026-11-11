@@ -1,6 +1,6 @@
 # SClass MVP
 
-A basic main menu built with **Vue + Vite**, communicating over HTTP with a **Python + FastAPI** backend. Existing SQL scripts in `supabase/` are preserved.
+A **Vue + Vite** app (login, student, lecturer and admin pages) communicating over HTTP with a **Python + FastAPI** backend. Existing SQL scripts in `supabase/` are preserved.
 
 ## Project structure
 
@@ -16,7 +16,7 @@ backend/
   tests/              Backend integration checks
 docs/backend/         Backend decisions, implementation notes and progress
 frontend/
-  src/                Vue main menu, styles, HTTP client
+  src/                Vue app shell, login, student/lecturer/admin pages, styles
   vite.config.js      Development proxy to FastAPI
 supabase/             Existing schema, migrations and seeds
 postman/              Optional local Supabase contract simulation
@@ -52,7 +52,7 @@ npm ci
 npm run dev
 ```
 
-Open **http://127.0.0.1:5173**. The main menu loads its display settings from FastAPI and shows backend/configuration status. Click **Test connection** to check Supabase. **Open API reference** opens FastAPI's interactive documentation.
+Open **http://127.0.0.1:5173**. You are sent to **/login**; log in with a Supabase Auth email and password that is linked to an admin, lecturer or student record (see [login and account setup](docs/backend/login.md)). Students go to **/student**, lecturers to **/lecturer** and administrators to **/admin**. FastAPI's interactive documentation is at **/docs**.
 
 ## Serve the built app through FastAPI
 
@@ -120,7 +120,7 @@ This engine produces a feasibility draft. Quality objectives are postponed; step
 
 ## Scheduling test page
 
-With FastAPI running, open **http://127.0.0.1:8000/development/scheduling-test-hayden**. Select a Monday, enter the intake's database UUID and optionally a group number. Generate all pending classes for that intake, or only that group. The page sends a request to the same API and displays proposed classes in campus-local time, readable course/room labels, selected scope, solver outcome, diagnostics, and raw JSON. Other intakes' existing bookings remain fixed constraints. It works without building Vue.
+With FastAPI running, log in as an administrator and open **http://127.0.0.1:8000/admin/development/scheduling-test-hayden** (also linked from `/admin`). Select a Monday, enter the intake's database UUID and optionally a group number. Generate all pending classes for that intake, or only that group. The page sends a request to the same API and displays proposed classes in campus-local time, readable course/room labels, selected scope, solver outcome, diagnostics, and raw JSON. Other intakes' existing bookings remain fixed constraints. It works without building Vue.
 
 This is a local-development admin tool. Generating a preview saves nothing, and quality optimization is disabled. Previews are not stored: leaving or reloading the page discards them. After review, **Save timetable…** opens a two-step confirmation (summary, then a tick box before **Confirm save**). Saving rechecks the week against the database, rejects a stale or edited preview, and writes all classes to `class_sessions` in one insert. Saved classes are visible to students and lecturers immediately, and the page has no undo. The API/page require `app.environment=development` and a direct localhost connection; remote/proxy access is rejected until authenticated access is implemented. Live use requires configured Supabase access, the teaching-requirement migration/views, and source data. See [API contract, setup, and test evidence](docs/backend/schedule-preview-api.md) and [timetable saving](docs/backend/timetable-saving.md).
 
@@ -132,10 +132,12 @@ Scheduling requests now have a displayed `X-Request-ID` and safe JSON traces in 
 | --- | --- |
 | `GET /api/health` | `200`: backend liveness, independent of Supabase |
 | `GET /api/config` | `200`: public `name`, `description`, `environment` |
-| `GET /api/health/database` | `200`: `connected`; `503`: `not_configured`, `error`, or `timeout` |
+| `GET /api/health/database` | Login required. `200`: `connected`; `503`: `not_configured`, `error`, or `timeout`; `401` when not logged in |
 | `POST /api/schedules/generate` | Development-only preview; required `week_start`, `intake_id` (UUID), optional positive integer `group_number`; no booking writes |
 | `POST /api/schedules/save` | Development-only admin save of a reviewed preview: the same scope plus `snapshot_revision` and every placement's `occurrence_id`, `room_id`, `starts_at`. `201` saves all classes; stale, partial or edited previews are rejected and nothing is written |
-| `GET /development/scheduling-test-hayden` | Development-only page for generating, reviewing and saving schedules |
+| `GET /admin/development/scheduling-test-hayden` | Development-only, admin-only page for generating, reviewing and saving schedules |
+| `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me` | Log in with Supabase email/password (httpOnly session cookies), log out, current user and role. Other `/api` endpoints need a login except `/api/health` and `/api/config`; see [login](docs/backend/login.md) |
+| `GET /login`, `/student`, `/lecturer`, `/admin` | Vue pages; redirect to `/login` when not logged in and to the user's own page for other roles |
 | `GET /docs` | Interactive OpenAPI reference |
 | `GET /openapi.json` | Generated, reusable API contract |
 

@@ -112,6 +112,10 @@ async function postJson(url, payload) {
       body: JSON.stringify(payload), cache: "no-store",
     });
     requestId = response.headers?.get("X-Request-ID") || "";
+    if (response.status === 401) {
+      // Session expired or logged out: back to the login page, then here again.
+      window.location.assign(`/login?next=${encodeURIComponent(window.location.pathname)}`);
+    }
     let data;
     try { data = await response.json(); } catch { throw new Error(`The server returned an unreadable response (HTTP ${response.status}).`); }
     if (!response.ok) {

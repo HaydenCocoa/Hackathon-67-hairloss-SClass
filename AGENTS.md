@@ -10,6 +10,14 @@
 - Keep the backend development checklist in `task_hayden.md` aligned with accepted requirements and completed milestones.
 - Never copy credentials, private student records, or other sensitive values into documentation.
 
+## Accepted login rules
+
+- Everyone logs in at `/login` with a Supabase Auth email and password; every other page redirects there when not logged in.
+- The backend handles login and keeps the session in httpOnly cookies; no Supabase key or token is sent to the browser.
+- Roles come from `admins`, `lecturers` and `students` linked by `auth_user_id`; an account linked to several uses admin > lecturer > student. Unlinked accounts are refused.
+- Pages: `/student`, `/lecturer`, `/admin` (empty placeholder owned by another team member). Development pages live under `/admin/development/` and need an admin login.
+- Do not change the student or lecturer page components for login work; only route users to them. Sign-up and password reset are out of scope.
+
 ## Accepted scheduling rules
 
 - Teaching weekdays and opening hours are defined in `Config/config.json`.
@@ -19,4 +27,4 @@
 - Teaching requirements repeat weekly over a database-defined period. Each lecture/lab section has a plan with a Monday start week, number of weeks, and occurrences per week. Preserve occurrence identity and original week when cancelling or moving it.
 - Step 3 uses the existing database dataset, confirmed ready by the user. Meeting and deliberately infeasible dataset fixtures are deferred for the initial MVP; do not add them as completion blockers or invent new hosted sample records.
 - The confirmed room policy is configurable: lectures use classrooms/auditoriums; tutorials and labs use classrooms/labs. Missing or empty mappings (initially `others`) reject placement. Use snapshot room rules, not the removed legacy section field.
-- Step 9 preview generation requires a selected intake UUID and optionally a group number; omission of the group means all groups in that intake. Preserve all existing class/meeting/reservation bookings and cross-intake student conflicts. Keep the API/test page local-development only; administrator authentication is deferred.
+- Step 9 preview generation requires a selected intake UUID and optionally a group number; omission of the group means all groups in that intake. Preserve all existing class/meeting/reservation bookings and cross-intake student conflicts. Keep the API/test page local-development only. Since 12 November 2026 it also requires an admin login and lives under `/admin/development/`.

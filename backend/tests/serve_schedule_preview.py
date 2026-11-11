@@ -1,6 +1,7 @@
 """Local UI QA service with synthetic PostgreSQL data, never hosted credentials.
 
 Run: python -m backend.tests.serve_schedule_preview
+Page: http://127.0.0.1:8001/admin/development/scheduling-test-hayden (log in as qa-admin@example.test / qa-password-synthetic)
 Requires the same Node/PGlite tooling as the snapshot integration tests.
 """
 import copy
@@ -17,6 +18,10 @@ import uvicorn
 from backend.app.config import PROJECT_ROOT, load_settings
 from backend.app.main import create_app
 
+# Synthetic QA login for the admin-only page; not a real account or password.
+QA_EMAIL, QA_PASSWORD = "qa-admin@example.test", "qa-password-synthetic"
+QA_USER, QA_ACCESS = "00000000-0000-0000-0000-0000000000aa", "qa-access-token"
+
 
 def main():
     exported = subprocess.run(
@@ -26,10 +31,23 @@ def main():
     )
     payload = json.loads(exported.stdout)
 
+    def reply(handler, status, body):
+        handler.send_response(status)
+        handler.send_header("Content-Type", "application/json")
+        handler.end_headers()
+        handler.wfile.write(json.dumps(body).encode())
+
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             parsed = urlsplit(self.path)
             params = {key: value[0] for key, value in parse_qs(parsed.query).items()}
+            # Synthetic Supabase Auth: one QA administrator (see QA_EMAIL below).
+            if parsed.path == "/auth/v1/user":
+                valid = self.headers.get("Authorization") == f"Bearer {QA_ACCESS}"
+                return reply(self, 200, {"id": QA_USER, "email": QA_EMAIL}) if valid else reply(self, 401, {})
+            if parsed.path in ("/rest/v1/admins", "/rest/v1/lecturers", "/rest/v1/students") and "auth_user_id" in params:
+                admin = parsed.path.endswith("admins") and params.get("auth_user_id") == f"eq.{QA_USER}"
+                return reply(self, 200, [{"id": QA_USER, "full_name": "QA Admin"}] if admin else [])
             data = copy.deepcopy(payload)
             requirements = data["requirements"] if params.get("target_week_start") == "eq.2026-11-09" else []
             bookings = data["class_bookings"]
@@ -85,9 +103,13 @@ def main():
             self.wfile.write(json.dumps(rows).encode())
 
         def do_POST(self):
+            rows = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"[]")
+            if urlsplit(self.path).path == "/auth/v1/token":
+                ok = rows.get("email") == QA_EMAIL and rows.get("password") == QA_PASSWORD
+                return reply(self, 200, {"access_token": QA_ACCESS, "refresh_token": "qa-refresh", "expires_in": 3600,
+                                         "user": {"id": QA_USER, "email": QA_EMAIL}}) if ok else reply(self, 400, {"error_code": "invalid_credentials"})
             # Step 10 save: accept a class_sessions bulk insert and echo ids. The
             # synthetic data is NOT changed, so the same week can be saved again.
-            rows = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"[]")
             created = [{"id": f"00000000-0000-0000-0000-{9000 + index:012d}", "occurrence_id": row["occurrence_id"]}
                        for index, row in enumerate(rows)]
             self.send_response(201 if urlsplit(self.path).path == "/rest/v1/class_sessions" else 404)

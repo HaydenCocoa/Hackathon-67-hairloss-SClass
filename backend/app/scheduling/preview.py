@@ -16,9 +16,10 @@ from uuid import UUID
 
 import anyio
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from ..auth import SessionUser, get_session, login_redirect
 from ..config import CourseType, Settings
 from ..student import Supabase, SupabaseWriteError
 from ..observability import REQUEST_ID, event, safe_frames
@@ -27,7 +28,8 @@ from .save import MAX_PLACEMENTS, SavedClass, SavePlacement, SaveRejected, SaveR
 from .solver import ClassPlacement, ScheduleResult, solve_weekly_schedule
 
 ASSETS = Path(__file__).resolve().parent / "development"
-PAGE_PATH = "/development/scheduling-test-hayden"
+# Admin-only development page (also requires development mode and localhost).
+PAGE_PATH = "/admin/development/scheduling-test-hayden"
 
 
 class GenerationRequest(BaseModel):
@@ -137,11 +139,20 @@ def create_preview_router(settings: Settings) -> APIRouter:
         if origin is not None and origin not in allowed:
             raise failure(403, "ORIGIN_NOT_ALLOWED", "This browser origin cannot use scheduling development tools.")
 
+    # Runs after development_access, so outside development the tools stay 404.
+    async def admin_access(session: SessionUser | None = Depends(get_session)) -> SessionUser:
+        if session is None:
+            raise failure(401, "AUTH_REQUIRED", "Log in as an administrator to use the scheduling tools.", "access_rejected")
+        if session.role != "admin":
+            raise failure(403, "ADMIN_REQUIRED", "Only administrators can use the scheduling tools.", "access_rejected")
+        return session
+
     router = APIRouter(dependencies=[Depends(development_access)], tags=["Scheduling development"])
+    admin_only = [Depends(admin_access)]
 
     @router.post(
-        "/api/schedules/generate", response_model=SchedulePreview,
-        responses={code: {"model": PreviewError} for code in (403, 404, 429, 500, 502, 503, 504)},
+        "/api/schedules/generate", response_model=SchedulePreview, dependencies=admin_only,
+        responses={code: {"model": PreviewError} for code in (401, 403, 404, 429, 500, 502, 503, 504)},
         summary="Generate a read-only weekly schedule preview (local development)",
         description="Schedules pending occurrences for one intake and optionally one group. All existing bookings remain fixed. Never saves bookings. Quality optimization is postponed.",
     )
@@ -199,8 +210,8 @@ def create_preview_router(settings: Settings) -> APIRouter:
                 slots.release()
 
     @router.post(
-        "/api/schedules/save", status_code=201, response_model=SaveResult,
-        responses={code: {"model": PreviewError} for code in (403, 404, 409, 429, 500, 502, 503, 504)},
+        "/api/schedules/save", status_code=201, response_model=SaveResult, dependencies=admin_only,
+        responses={code: {"model": PreviewError} for code in (401, 403, 404, 409, 429, 500, 502, 503, 504)},
         summary="Save a reviewed preview as real class bookings (local development, admin use)",
         description="Re-reads the week, rejects the save if anything changed since the preview, revalidates every class, "
                     "then inserts all classes into class_sessions in one statement (all or nothing). Saved classes are "
@@ -274,16 +285,21 @@ def create_preview_router(settings: Settings) -> APIRouter:
                 slots.release()
 
     @router.get(PAGE_PATH, include_in_schema=False)
-    async def page():
+    async def page(session: SessionUser | None = Depends(get_session)):
+        no_store = {"Cache-Control": "no-store"}
+        if session is None:
+            return RedirectResponse(login_redirect(PAGE_PATH), status_code=303, headers=no_store)
+        if session.role != "admin":
+            return RedirectResponse(session.home, status_code=303, headers=no_store)
         html = (ASSETS / "index.html").read_text(encoding="utf-8").replace("__CAMPUS_TIMEZONE__", escape(settings.scheduling.timezone, quote=True))
         return HTMLResponse(html, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
                                            "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"})
 
-    @router.get(PAGE_PATH + "/app.js", include_in_schema=False)
+    @router.get(PAGE_PATH + "/app.js", include_in_schema=False, dependencies=admin_only)
     async def script():
         return FileResponse(ASSETS / "app.js", media_type="text/javascript", headers={"Cache-Control": "no-store"})
 
-    @router.get(PAGE_PATH + "/style.css", include_in_schema=False)
+    @router.get(PAGE_PATH + "/style.css", include_in_schema=False, dependencies=admin_only)
     async def stylesheet():
         return FileResponse(ASSETS / "style.css", media_type="text/css", headers={"Cache-Control": "no-store"})
 

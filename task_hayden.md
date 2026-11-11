@@ -197,7 +197,7 @@ Initial preference order:
 - [x] Associate the preview with its input revision so later data changes can be detected.
 - [x] Schedule only selected intake/group pending occurrences jointly while retaining all fixed bookings and cross-intake student conflicts. Bind the input revision to the selected scope. Restrict API/page/assets to direct localhost access in development, with host/origin/proxy checks.
 - [x] Make the operation usable through FastAPI's API documentation.
-- [x] Serve `/development/scheduling-test-hayden` with Monday/intake/group inputs, API submission, local-time preview table, diagnostics, errors, and raw JSON.
+- [x] Serve the development page (now `/admin/development/scheduling-test-hayden`, admin login required) with Monday/intake/group inputs, API submission, local-time preview table, diagnostics, errors, and raw JSON.
 - [x] Bound generation to one request per process and offload solver work so unrelated requests remain responsive.
 - [x] Add safe console/rotating-file traces and request IDs shown on the page, with per-stage direct-read tracing. See [scheduling logging](docs/backend/scheduling-logging.md).
 
@@ -208,7 +208,7 @@ Verification status on 11 November: code and HTTP-provider fixtures were updated
 ## 10. Implement safe timetable saving
 
 - [x] Add an operation to commit a generated preview: `POST /api/schedules/save` and a Save button with two-step confirmation on the development page.
-- [ ] Verify the caller's permission to perform the scheduling operation. **Deferred until the login page exists**; meanwhile admin-only via the development/localhost checks.
+- [x] Verify the caller's permission to perform the scheduling operation: admin login required since 12 November 2026 (plus the development/localhost checks). See [login](docs/backend/login.md).
 - [x] Detect stale previews (scope-bound revision must match) and recheck current data and availability before writing. Not inside one database transaction (accepted for the hackathon).
 - [ ] Use a consistent locking strategy for all relevant booking and roster changes. Partial: saves and previews share one per-process slot, and the insert takes the existing advisory lock. Other writers (dashboard, lecturer reschedule endpoint) do not follow the save checks.
 - [ ] Save assignments and relevant audit information together in one database transaction. Assignments: done (one insert). **Audit deferred until login exists.**
@@ -274,6 +274,20 @@ KK's required workflow:
 `Teaching requirements → generation → preview → commit → timetable retrieval`
 
 All acceptance scenarios must pass before treating the scheduling backend as ready for frontend integration.
+
+## Login and role-based access (added 12 November 2026)
+
+- [x] `/login` page with Supabase Auth email + password; the backend keeps the session in httpOnly cookies.
+- [x] Resolve one role per account from `admins` / `lecturers` / `students` (`auth_user_id`), priority admin > lecturer > student; refuse unlinked accounts.
+- [x] Redirect every page that needs a login to `/login` (server side and in the Vue app), and each role to its own page: `/student`, `/lecturer`, `/admin`.
+- [x] Remove the main menu; add an empty `/admin` placeholder for the admin team.
+- [x] Enforce access in the API: students their own timetable, lecturers their own classes (including reschedule ownership), admins everything; scheduling tools admin-only.
+- [x] Move development pages under `/admin/development/` with admin login.
+- [ ] Create Supabase accounts and link `auth_user_id` for real users (project owner; steps in [login](docs/backend/login.md)).
+- [ ] Verify login against the hosted Supabase project and in a real browser.
+- [ ] Record who saved a timetable (`schedule_changes`, needs a "create" action).
+
+**Complete when:** each role can log in, is limited to its own data, and every protected page redirects to `/login` when not logged in. Locally verified on 12 November; hosted verification pending.
 
 ## Suggested delivery milestones
 

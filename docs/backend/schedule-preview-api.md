@@ -88,7 +88,7 @@ Start the existing FastAPI service from the repository root:
 .\.venv\Scripts\python.exe -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers
 ```
 
-Open **http://127.0.0.1:8000/development/scheduling-test-hayden**. No Vue build or extra page framework is required. Select a Monday, enter an intake UUID and optionally a group number, then click Generate preview. Leaving the group blank includes all groups in that intake. The page sends the selected scope to the same service, displays loading/errors, and renders new proposed classes in the response's campus timezone, including fractional seconds. It also shows the selected scope, status/counts, diagnostics, revision, and expandable raw JSON. Existing bookings remain constraints and are not included as new rows. Labels are rendered as text to avoid interpreting database content as HTML. The HTML enforces a self-only content policy.
+Open **http://127.0.0.1:8000/admin/development/scheduling-test-hayden** (moved under `/admin` on 12 November 2026; an admin login is now required, see [login](login.md)). No Vue build or extra page framework is required. Select a Monday, enter an intake UUID and optionally a group number, then click Generate preview. Leaving the group blank includes all groups in that intake. The page sends the selected scope to the same service, displays loading/errors, and renders new proposed classes in the response's campus timezone, including fractional seconds. It also shows the selected scope, status/counts, diagnostics, revision, and expandable raw JSON. Existing bookings remain constraints and are not included as new rows. Labels are rendered as text to avoid interpreting database content as HTML. The HTML enforces a self-only content policy.
 
 If startup fails with Windows socket error 10048, check whether a previous service already owns the address before starting another instance:
 
@@ -126,7 +126,7 @@ In another terminal:
 
 ```powershell
 $env:NODE_PATH = (Join-Path (Get-Location).Path '.sql-tools/ui-test/node_modules')
-$env:SCHEDULING_UI_URL = 'http://127.0.0.1:8001/development/scheduling-test-hayden'
+$env:SCHEDULING_UI_URL = 'http://127.0.0.1:8001/admin/development/scheduling-test-hayden'
 node --test backend/tests/schedule-preview-ui.test.cjs
 Remove-Item Env:SCHEDULING_UI_URL
 Remove-Item Env:NODE_PATH
