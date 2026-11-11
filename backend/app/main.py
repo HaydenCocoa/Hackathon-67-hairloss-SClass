@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import AppSettings, PROJECT_ROOT, Settings, load_settings
 from .database import DatabaseHealth, check_database
 from .student import create_student_router
+from .lecturer import create_lecturer_router
 
 
 def create_app(settings: Settings | None = None, frontend_dist: Path | None = None) -> FastAPI:
@@ -50,6 +51,8 @@ def create_app(settings: Settings | None = None, frontend_dist: Path | None = No
 
     # Student Page (Bi Jin): profile + weekly timetable
     app.include_router(create_student_router(settings.supabase))
+
+    app.include_router(create_lecturer_router(settings.supabase))
 
     @app.get("/", include_in_schema=False)
     async def index():
