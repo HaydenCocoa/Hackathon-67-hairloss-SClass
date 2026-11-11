@@ -25,7 +25,7 @@ def requirement(number=1, **changes):
         "occurrence_number": number, "requirement_status": "required",
         "timezone": "Asia/Kuala_Lumpur", "class_session_id": None,
         "booking_status": None, "starts_at": None, "room_id": None,
-        "needs_scheduling": True, "group_number": 1, "required_room_type": "lab",
+        "needs_scheduling": True, "group_number": 1,
         "intake_id": str(UUID(int=22)), "lecturer_id": str(UUID(int=23)),
         "course_id": str(UUID(int=24)), "course_code": "CS1",
         "course_name": "Subject", "course_type": "lab", "duration_minutes": 120,
@@ -178,12 +178,11 @@ def test_reader_reports_upstream_timeout(database_server):
     assert error.value.status_code == 504
 
 
-def test_reader_accepts_view_without_removed_room_requirement(database_server):
+def test_reader_selects_backend_contract_without_legacy_room_requirement(database_server):
     settings, state = database_server
     row = requirement()
-    del row["required_room_type"]
     state["rows"] = [row]
     result = read_week(settings)
-    assert result[0].required_room_type is None
     assert result[0].course_type == "lab"
-    assert state["calls"][0]["query"]["select"] == ["*"]
+    selected = state["calls"][0]["query"]["select"][0].split(",")
+    assert "required_room_type" not in selected

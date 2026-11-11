@@ -92,7 +92,7 @@ See [teaching-plan setup and behavior](docs/backend/weekly-teaching-plans.md). T
 
 ## Scheduling input loader
 
-Apply [the snapshot migration](supabase/migrations/202611100003_scheduling_snapshot.sql) after the teaching-requirement migration. The internal `load_scheduling_snapshot` function then reads one consistent week's requirements, unique student rosters, lecturers, rooms, and overlapping bookings through a read-only server-only database function. It adds configured opening windows and returns immutable input with a content fingerprint for later scheduling work.
+The internal `load_scheduling_snapshot` function reads the existing weekly occurrence and booking views, memberships, rooms, and referenced lecturers through backend-owned Supabase table/view requests. It assembles unique student rosters, adds configured opening windows, validates the result, and returns immutable input with a content fingerprint. The backend no longer requires the snapshot RPC migration; see [loader setup, validation, consistency limits, and verification](docs/backend/scheduling-data-loader.md).
 
 Both the loader and older weekly reader support views with or without the removed legacy section room-type field. Configured compatibility rules are captured for booking validation. See [loader setup, validation, and verification](docs/backend/scheduling-data-loader.md).
 
@@ -122,9 +122,9 @@ This engine produces a feasibility draft. Quality objectives are postponed; step
 
 With FastAPI running, open **http://127.0.0.1:8000/development/scheduling-test-hayden**. Select a Monday, enter the intake's database UUID and optionally a group number. Generate all pending classes for that intake, or only that group. The page sends a request to the same API and displays proposed classes in campus-local time, readable course/room labels, selected scope, solver outcome, diagnostics, and raw JSON. Other intakes' existing bookings remain fixed constraints. It works without building Vue.
 
-This is a read-only local-development tool: no bookings are saved and quality optimization is disabled. The API/page require `app.environment=development` and a direct localhost connection; remote/proxy access is rejected until authenticated access is implemented. Live generation requires configured Supabase access and the earlier teaching-plan/snapshot migrations and data. See [API contract, setup, and test evidence](docs/backend/schedule-preview-api.md).
+This is a read-only local-development tool: no bookings are saved and quality optimization is disabled. The API/page require `app.environment=development` and a direct localhost connection; remote/proxy access is rejected until authenticated access is implemented. Live generation requires configured Supabase access, the teaching-requirement migration/views, and source data. The direct reads are multiple requests, so step 10 must revalidate transactionally before saving. See [API contract, setup, and test evidence](docs/backend/schedule-preview-api.md).
 
-Scheduling requests now have a displayed `X-Request-ID` and safe JSON traces in the backend terminal and ignored `logs/scheduling.log`. Restart the backend to load logging changes, then watch with `Get-Content .\logs\scheduling.log -Tail 50 -Wait`. Provider `PGRST202` is reported as `SCHEDULING_RPC_NOT_FOUND`, with migration/cache guidance. See [logging and database setup diagnosis](docs/backend/scheduling-logging.md).
+Scheduling requests now have a displayed `X-Request-ID` and safe JSON traces in the backend terminal and ignored `logs/scheduling.log`. Restart the backend to load code changes, then watch with `Get-Content .\logs\scheduling.log -Tail 50 -Wait`. Direct backend database reads record the stage that succeeded or failed; see [scheduling logging and database-read diagnosis](docs/backend/scheduling-logging.md).
 
 ## API contract
 

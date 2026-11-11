@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..config import CourseType, Settings
-from ..student import Supabase, SupabaseRPCError
+from ..student import Supabase
 from ..observability import REQUEST_ID, event, safe_frames
 from .loader import SchedulingDataError, SchedulingSnapshot, load_scheduling_snapshot
 from .solver import ClassPlacement, ScheduleResult, solve_weekly_schedule
@@ -175,8 +175,6 @@ def create_preview_router(settings: Settings) -> APIRouter:
                 )
             except SchedulingDataError as exc:
                 raise failure(502, exc.code, exc.detail) from exc
-            except SupabaseRPCError as exc:
-                raise failure(exc.status_code, exc.code, str(exc.detail)) from exc
             except HTTPException as exc:
                 if isinstance(exc.detail, dict):
                     raise

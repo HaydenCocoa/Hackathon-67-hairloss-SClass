@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
 from uuid import UUID
@@ -10,7 +11,8 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, computed_field, field_validator, model_validator
 
 from ..config import CourseType, RoomType, SchedulingSettings
-from ..student import Supabase
+from ..student import Supabase, in_list
+from ..observability import event
 from .calendar import TeachingCalendar
 from .requirements import TeachingOccurrence
 
@@ -187,10 +189,11 @@ def _canonical(value: Any) -> Any:
 async def load_scheduling_snapshot(
     db: Supabase, settings: SchedulingSettings, week_start: date,
 ) -> SchedulingSnapshot:
-    """Use one STABLE database RPC, then resolve immutable engine inputs.
+    """Fetch source rows through Supabase's table/view API and resolve engine inputs.
 
-    The result is a point-in-time read, not a resource lock or committed booking.
-    This function is internal and requires a trusted server database reader.
+    The backend owns query orchestration and snapshot assembly. PostgREST requests
+    are separate reads rather than one PostgreSQL transaction, so the result is
+    an observed capture, not a database-level point-in-time snapshot or lock.
     """
     if not isinstance(week_start, date) or isinstance(week_start, datetime) or week_start.weekday() != 0:
         raise ValueError("week_start must be a Monday date")
@@ -199,7 +202,96 @@ async def load_scheduling_snapshot(
     zone = ZoneInfo(settings.timezone)
     start = datetime.combine(week_start, datetime.min.time(), zone).astimezone(timezone.utc)
     end = datetime.combine(week_start + timedelta(days=7), datetime.min.time(), zone).astimezone(timezone.utc)
-    raw = await db.rpc("load_scheduling_data", {"p_week_start": week_start.isoformat(), "p_timezone": settings.timezone})
+    start_iso, end_iso = start.isoformat(), end.isoformat()
+
+    async def fetch_all(stage: str, table: str, params: list[tuple[str, str]]) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        event("snapshot_query_started", stage=stage)
+        try:
+            while True:
+                page = await db.get(table, [*params, ("limit", "500"), ("offset", str(len(rows)))])
+                rows.extend(page)
+                if len(page) < 500:
+                    break
+        except Exception as exc:
+            event("snapshot_query_failed", level=logging.WARNING, stage=stage,
+                  provider_status=getattr(exc, "provider_status", None), exception_type=type(exc).__name__)
+            raise
+        event("snapshot_query_completed", stage=stage, row_count=len(rows))
+        return rows
+
+    requirement_select = (
+        "occurrence_id,plan_id,section_id,original_week_start,target_week_start,teaching_week_number,"
+        "occurrence_number,requirement_status,timezone,class_session_id,booking_status,starts_at,room_id,"
+        "needs_scheduling,group_number,intake_id,lecturer_id,course_id,course_code,course_name,course_type,duration_minutes"
+    )
+    requirements = await fetch_all("load_requirements", "teaching_occurrence_details", [
+        ("select", requirement_select), ("target_week_start", f"eq.{week_start.isoformat()}"),
+        ("order", "occurrence_id.asc"),
+    ])
+    class_rows = await fetch_all("load_class_bookings", "class_session_details", [
+        ("select", "id,section_id,room_id,starts_at,ends_at,status,group_number,intake_id,lecturer_id,duration_minutes"),
+        ("status", "eq.scheduled"), ("starts_at", f"lt.{end_iso}"), ("ends_at", f"gt.{start_iso}"),
+        ("order", "id.asc"),
+    ])
+    if class_rows:
+        links = await fetch_all("load_occurrence_links", "class_sessions", [
+            ("select", "id,occurrence_id"), ("id", in_list(row["id"] for row in class_rows)),
+            ("order", "id.asc"),
+        ])
+        occurrence_by_session = {row["id"]: row.get("occurrence_id") for row in links}
+        for row in class_rows:
+            row["occurrence_id"] = occurrence_by_session.get(row["id"])
+
+    meetings = await fetch_all("load_meetings", "meeting_sessions", [
+        ("select", "id,lecturer_id,room_id,starts_at,ends_at,status"), ("status", "eq.scheduled"),
+        ("starts_at", f"lt.{end_iso}"), ("ends_at", f"gt.{start_iso}"), ("order", "id.asc"),
+    ])
+    if meetings:
+        attendees = await fetch_all("load_meeting_attendees", "meeting_students", [
+            ("select", "meeting_id,student_id"), ("meeting_id", in_list(row["id"] for row in meetings)),
+            ("order", "meeting_id.asc,student_id.asc"),
+        ])
+        students_by_meeting: dict[str, list[str]] = {}
+        for row in attendees:
+            students_by_meeting.setdefault(row["meeting_id"], []).append(row["student_id"])
+        for row in meetings:
+            row["student_ids"] = students_by_meeting.get(row["id"], [])
+
+    relevant_sections = {
+        (row["section_id"], row["intake_id"], row["group_number"])
+        for row in [*requirements, *class_rows]
+    }
+    intake_ids = {intake_id for _, intake_id, _ in relevant_sections}
+    memberships = await fetch_all("load_group_memberships", "student_intakes", [
+        ("select", "student_id,intake_id,group_number"), ("intake_id", in_list(intake_ids)),
+        ("order", "intake_id.asc,group_number.asc,student_id.asc"),
+    ]) if intake_ids else []
+    students_by_group: dict[tuple[str, int], list[str]] = {}
+    for row in memberships:
+        students_by_group.setdefault((row["intake_id"], row["group_number"]), []).append(row["student_id"])
+    rosters = [{
+        "section_id": section_id, "intake_id": intake_id, "group_number": group_number,
+        "student_ids": students_by_group.get((intake_id, group_number), []),
+    } for section_id, intake_id, group_number in sorted(relevant_sections)]
+
+    rooms = await fetch_all("load_rooms", "rooms", [
+        ("select", "id,name,building,capacity,room_type,is_active"), ("order", "id.asc"),
+    ])
+    lecturer_ids = {row["lecturer_id"] for row in [*requirements, *class_rows, *meetings]}
+    lecturers = await fetch_all("load_lecturers", "lecturers", [
+        ("select", "id"), ("id", in_list(lecturer_ids)), ("order", "id.asc"),
+    ]) if lecturer_ids else []
+
+    captured_at = datetime.now(timezone.utc)
+    raw = {
+        "schema_version": 1, "week_start": week_start, "timezone": settings.timezone,
+        "horizon_starts_at": start, "horizon_ends_at": end, "captured_at": captured_at,
+        # This is a capture marker, not a PostgreSQL MVCC snapshot identifier.
+        "database_snapshot": f"postgrest-multi-read:{captured_at.isoformat()}",
+        "requirements": requirements, "rosters": rosters, "rooms": rooms,
+        "lecturers": lecturers, "class_bookings": class_rows, "meeting_bookings": meetings,
+    }
     try:
         data = _Payload.model_validate(raw)
     except ValidationError as exc:

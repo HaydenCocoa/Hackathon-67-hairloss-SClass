@@ -9,6 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 from time import sleep
 from uuid import UUID
+from urllib.parse import parse_qs, urlsplit
 
 import httpx
 import pytest
@@ -51,12 +52,59 @@ def provider(sql_payload, monkeypatch):
     state = {"payload": copy.deepcopy(sql_payload), "calls": [], "status": 200, "body": None, "delay": 0}
 
     class Handler(BaseHTTPRequestHandler):
-        def do_POST(self):
-            parameters = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-            state["calls"].append({"path": self.path, "parameters": parameters, "headers": dict(self.headers)})
+        def do_GET(self):
+            parsed = urlsplit(self.path)
+            params = {key: value[0] for key, value in parse_qs(parsed.query).items()}
+            state["calls"].append({"path": parsed.path, "parameters": params, "headers": dict(self.headers)})
             sleep(state["delay"])
-            status = state["status"] if self.path == "/rest/v1/rpc/load_scheduling_data" else 501
-            body = state["body"] if state["body"] is not None else json.dumps(state["payload"]).encode()
+            payload = state["payload"]
+            table = parsed.path.removeprefix("/rest/v1/")
+            source = {
+                "teaching_occurrence_details": payload["requirements"],
+                "class_session_details": [{key: row[key] for key in
+                                           ("id", "section_id", "room_id", "starts_at", "ends_at", "status",
+                                            "group_number", "intake_id", "lecturer_id", "duration_minutes")}
+                                          for row in payload["class_bookings"]],
+                "class_sessions": [{"id": row["id"], "occurrence_id": row["occurrence_id"]}
+                                   for row in payload["class_bookings"]],
+                "meeting_sessions": [{key: row[key] for key in
+                                      ("id", "lecturer_id", "room_id", "starts_at", "ends_at", "status")}
+                                     for row in payload["meeting_bookings"]],
+                "meeting_students": [{"meeting_id": row["id"], "student_id": student_id}
+                                     for row in payload["meeting_bookings"] for student_id in row["student_ids"]],
+                "student_intakes": [{"student_id": student_id, "intake_id": row["intake_id"],
+                                     "group_number": row["group_number"]}
+                                    for row in payload["rosters"] for student_id in row["student_ids"]],
+                "rooms": payload["rooms"],
+                "lecturers": payload["lecturers"],
+            }.get(table, [])
+
+            def matches(row, key, expression):
+                if expression.startswith("eq."):
+                    return str(row.get(key)) == expression[3:]
+                if expression.startswith("in.("):
+                    accepted = expression[4:-1].replace('"', "").split(",")
+                    return str(row.get(key)) in accepted
+                for operator, compare in (("lt.", lambda left, right: left < right),
+                                          ("gt.", lambda left, right: left > right)):
+                    if expression.startswith(operator):
+                        left, right = row.get(key), expression[len(operator):]
+                        if key.endswith("_at"):
+                            return compare(datetime.fromisoformat(left.replace("Z", "+00:00")),
+                                           datetime.fromisoformat(right.replace("Z", "+00:00")))
+                        return compare(str(left), right)
+                return True
+
+            rows = [row for row in source if all(matches(row, key, value) for key, value in params.items()
+                                                  if key not in {"select", "order", "limit", "offset"})]
+            order = params.get("order", "")
+            if order:
+                keys = [item.split(".")[0] for item in order.split(",")]
+                rows.sort(key=lambda row: tuple(str(row.get(key)) for key in keys))
+            offset, limit = int(params.get("offset", "0")), int(params.get("limit", "500"))
+            rows = rows[offset:offset + limit]
+            status = state["status"]
+            body = state["body"] if state["body"] is not None else json.dumps(rows).encode()
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
@@ -116,8 +164,13 @@ def test_real_postgresql_output_becomes_complete_engine_input_over_http(provider
     assert snapshot.opening_windows[0].ends_at.isoformat() == "2026-11-09T10:00:00+00:00"
     assert any(row.starts_at < snapshot.horizon_starts_at for row in snapshot.class_bookings)
     assert fixed.ends_at - fixed.starts_at == timedelta(minutes=120)
-    assert len(state["calls"]) == 1
-    assert state["calls"][0]["parameters"] == {"p_week_start": "2026-11-09", "p_timezone": "Asia/Kuala_Lumpur"}
+    assert {call["path"] for call in state["calls"]} >= {
+        "/rest/v1/teaching_occurrence_details", "/rest/v1/class_session_details",
+        "/rest/v1/class_sessions", "/rest/v1/student_intakes", "/rest/v1/rooms", "/rest/v1/lecturers",
+    }
+    occurrence_query = next(call for call in state["calls"] if call["path"] == "/rest/v1/teaching_occurrence_details")
+    assert occurrence_query["parameters"]["target_week_start"] == "eq.2026-11-09"
+    assert all(call["path"] != "/rest/v1/rpc/load_scheduling_data" for call in state["calls"])
     assert state["calls"][0]["headers"]["apikey"] == "sb_secret_snapshot_test"
     assert "Authorization" not in state["calls"][0]["headers"]
     assert len(snapshot.revision) == 64
@@ -146,7 +199,7 @@ def test_real_postgresql_output_becomes_complete_engine_input_over_http(provider
     assert [item.occurrence_id for item in solved.placements] == [lesson.occurrence_id]
     assert solved.placements[0].room_id == UUID(int=60)
     assert solved.snapshot_revision == snapshot.revision
-    assert len(state["calls"]) == 1  # Generation makes no further database requests.
+    assert len(state["calls"]) > 1  # Generation uses backend-orchestrated table/view reads.
 
 
 def test_unique_student_counts_and_input_fingerprint_ignore_order_and_capture_metadata(provider):
@@ -270,10 +323,10 @@ def test_existing_online_meeting_can_be_loaded_without_requiring_hosted_meeting_
 
 
 @pytest.mark.parametrize("status,body", [
-    (404, b'{"message":"function missing"}'), (401, b'{"message":"private key details"}'),
-    (500, b'<html>private provider error</html>'), (200, b'not-json'), (200, b'[]'),
+    (404, b'{"message":"missing relation"}'), (401, b'{"message":"private key details"}'),
+    (500, b'<html>private provider error</html>'), (200, b'not-json'),
 ])
-def test_rpc_failures_are_not_treated_as_empty_schedules(provider, status, body):
+def test_table_read_failures_are_not_treated_as_empty_schedules(provider, status, body):
     _, state = provider
     state.update(status=status, body=body)
     with pytest.raises(HTTPException) as error:

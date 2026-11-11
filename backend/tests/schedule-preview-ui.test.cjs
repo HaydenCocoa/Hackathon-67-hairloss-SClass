@@ -182,14 +182,14 @@ test('provider error shows its classification and trace ID for log lookup', asyn
   const traceId = 'a'.repeat(32);
   const dom = page(async () => ({
     ok: false, status: 502, headers: { get: () => traceId },
-    json: async () => ({ detail: { code: 'SCHEDULING_RPC_NOT_FOUND', message: 'Check the snapshot migration and schema cache.', request_id: traceId } }),
+    json: async () => ({ detail: { code: 'DATABASE_UNAVAILABLE', message: 'A scheduling data read failed.', request_id: traceId } }),
   }));
   try {
     submit(dom);
     await settled(dom);
     const status = dom.window.document.querySelector('#status').textContent;
-    assert.match(status, /SCHEDULING_RPC_NOT_FOUND/);
-    assert.match(status, /Check the snapshot migration/);
+    assert.match(status, /DATABASE_UNAVAILABLE/);
+    assert.match(status, /scheduling data read failed/);
     assert.ok(status.includes(`Request ID: ${traceId}`));
     assert.equal(dom.window.document.querySelector('#result').hidden, true);
   } finally { dom.window.close(); }

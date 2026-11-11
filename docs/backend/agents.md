@@ -1,6 +1,6 @@
 # Backend record
 
-Last updated: 10 November 2026 (Asia/Kuala_Lumpur).
+Last updated: 11 November 2026 (Asia/Kuala_Lumpur).
 
 ## Documentation convention
 
@@ -36,9 +36,11 @@ The existing backend provides health/configuration checks, a Supabase read-conne
 
 Step 1 now adds validated scheduling settings, a reusable calendar helper, and initialization on FastAPI app state. Invalid calendar settings fail startup. The helper accepts arbitrary start timestamps and checks the complete interval against configured local opening hours. It does not generate classes or check lecturer/student/room conflicts.
 
-Step 2 adds database-defined weekly teaching plans, automatic expansion into stable occurrences, optional booking links, cancellation/move integrity, and an internal paginated weekly-demand reader. The migration is verified locally but not applied to a hosted project. See [implemented weekly teaching plans](weekly-teaching-plans.md) for setup, interfaces, decisions, and limits.
+Step 2 adds database-defined weekly teaching plans, automatic expansion into stable occurrences, optional booking links, cancellation/move integrity, and an internal paginated weekly-demand reader. The original design was verified locally; the 11 November compatibility edit for databases without `required_room_type` has not yet been verified or applied to a hosted project. See [implemented weekly teaching plans](weekly-teaching-plans.md) for setup, interfaces, decisions, and limits.
 
 Steps 4-7 add the validated weekly snapshot, shared booking validator, unrestricted candidate ranges, and complete CP-SAT feasibility generation with post-solve verification. Step 8 quality optimization is postponed. Step 9 exposes read-only generation through a local-development HTTP API and a service-hosted test page; these are verified locally. Authentication and transactional booking commits remain future work.
+
+The step 4 loader was changed on 11 November at the user's direction: the backend now reads existing Supabase tables/views and assembles its own scheduling input. It no longer invokes the optional historical snapshot RPC migration. Verification of these direct reads is pending; see [the updated loader record](scheduling-data-loader.md). The separate PostgREST requests are not one transaction snapshot, so any later booking write must revalidate transactionally.
 
 No database schema or hosted data was changed for step 1. No frontend change was needed.
 
@@ -47,9 +49,9 @@ No database schema or hosted data was changed for step 1. No frontend change was
 | Step | Requirement and completion target | Status |
 | --- | --- | --- |
 | 1 | Configurable teaching calendar and reusable full-interval eligibility check | Complete; verified |
-| 2 | Database-backed weekly teaching requirements and stable occurrences, with cancellation and replacement tracking | Core implementation verified locally; hosted migration pending; additional proposals under review |
+| 2 | Database-backed weekly teaching requirements and stable occurrences, with cancellation and replacement tracking | Migration updated on 11 Nov to support the removed room field; verification pending; hosted migration pending |
 | 3 | Use existing database scheduling inputs; defer meeting and impossible-arrangement fixtures for the initial MVP | Complete based on user confirmation; no new runtime code |
-| 4 | Validated scheduling input snapshot resolving rosters, resources, requirements, and existing bookings | Complete and verified locally; snapshot migration pending for hosted use |
+| 4 | Backend loader reads existing scheduling data and builds a validated engine snapshot | Backend implementation updated to direct PostgREST reads on 11 Nov; verification pending |
 | 5 | Explainable room, lecturer, student, and reservation conflict validation | Complete and verified locally; no new migration |
 | 6 | Feasible start ranges and suitable rooms without preset teaching slots | Complete and verified locally; no new migration |
 | 7 | CP-SAT generation satisfying all mandatory constraints and reporting accurate solver status | Complete and verified locally; no new migration |
@@ -110,7 +112,7 @@ Historical discussion; superseded by the implementation record below after the u
 - Cancellation stays cancelled across re-expansion. Explicit make-up demand reopens the same occurrence and selects a target week; dated booking moves synchronize target weeks without changing original identity.
 - Existing sessions are retained and not automatically linked. Legacy bookings must be reconciled before new generation for their period.
 - Added `TeachingPlanInput`, `TeachingOccurrence`, and `load_weekly_requirements` in `backend/app/scheduling/requirements.py`. The reader fetches all or only outstanding demand for one Monday-anchored target week, with pagination and explicit malformed/missing-view/timeout failures. It is internal; no unauthenticated write or generation endpoint was added.
-- Existing offering-end-date and system room-policy proposals are preserved as pending. This implementation retains `required_room_type`, does not enforce an offering end date, and does not introduce automatic holiday or break handling.
+- The offering-end-date proposal remains deferred. The original Step 2 migration retained `required_room_type`; this was superseded by the 11 November update below. No offering end date or automatic holiday/break handling is introduced.
 - No hosted project was contacted or changed. Apply the additive migration once and enter actual section teaching periods to use it in Supabase.
 - Documentation: [weekly teaching plans](weekly-teaching-plans.md), [original discussion](teaching-requirements.md), root README, database README, and `task_hayden.md`.
 - Verification: focused reader/input suite **16 passed**; full backend suite **59 passed, 1 optional simulation test skipped**, with one existing test-client deprecation warning. Database checks: **51** new teaching-requirement checks, **52** schema/integrity/access, **78** membership/seed/upgrade, and **20** course-seed checks all passed (**201 total**). `git diff --check` and local documentation-link checks passed.
@@ -135,7 +137,7 @@ Historical discussion; superseded by the implementation record below after the u
 - [SQL-only removal notes](required-room-type-removal.md) distinguish the prepared patch from remaining work: current Python requirements reader, old course seed/migration, fresh setup, and ERD still need coordinated adaptation. System-defined room suitability is not implemented by the SQL patch.
 - Verification: 25 PostgreSQL/PGlite checks passed for the patch, including optional teaching-plan support, preserved data/protections, access grants, reruns, and safe rollback. No backend runtime suite or live database execution was performed.
 
-## Step 4 implementation — 10 November 2026
+## Step 4 implementation — 10 November 2026 (initial design; superseded 11 November)
 
 - Implemented [the scheduling-data loader](scheduling-data-loader.md) as an internal backend function, `load_scheduling_snapshot(db, settings, week_start)`.
 - Added `202611100003_scheduling_snapshot.sql`: a STABLE, security-invoker, service-role-only function returning one complete weekly JSON payload. Requirements, group rosters, lecturer references, room inventory, and overlapping bookings use one database read snapshot instead of independent requests. The migration requests a PostgREST schema-cache refresh and does not insert or modify scheduling records.
@@ -148,12 +150,12 @@ Historical discussion; superseded by the implementation record below after the u
 - Added local SQL fixtures/tests and HTTP integration tests using JSON generated by the real PostgreSQL function. Verified both migration orders relevant to the optional room removal, plus cached-view recreation after a prior snapshot read.
 - Verification: **32** new snapshot SQL checks; **53** focused loader/weekly-reader tests; full backend suite **96 passed, 1 optional simulation test skipped**, with one existing deprecation warning. All six SQL suites passed (**258 database checks total**). `git diff --check` and documentation links passed.
 - Used the existing ignored local Python/PGlite test tooling. Postman CLI is unavailable; the existing CLI mock still covers only the rooms probe. The new transport was exercised through a temporary local HTTP stand-in, not a deployed mock or hosted provider. No hosted data was queried or changed.
-- Updated the checklist, root/database README, detailed loader notes, simulation evidence record, and room-removal compatibility notes. Step 4 is complete locally; apply the new snapshot migration before live use. Availability/conflict validation is step 5 and remains unimplemented.
+- Updated the checklist, root/database README, detailed loader notes, simulation evidence record, and room-removal compatibility notes. At that date, the implementation depended on applying the snapshot RPC migration; that deployment instruction was superseded by the 11 November direct-read implementation. Availability/conflict validation was step 5 and is recorded below.
 
 ## Step 5 implementation — 10 November 2026
 
 - The user confirmed the room mapping: lectures may use classrooms or auditoriums; tutorials and labs may use classrooms or labs. Added `scheduling.room_compatibility` to tracked configuration. `others` starts with an empty mapping and is rejected until explicitly configured.
-- Added typed configuration and immutable `RoomRule` values to the scheduling snapshot. Input fingerprints include the captured policy. Input loading remains one read-only RPC; no extra external request or migration is needed.
+- Added typed configuration and immutable `RoomRule` values to the scheduling snapshot. Input fingerprints include the captured policy. (The original single-RPC transport was replaced on 11 November; see the superseding entry below.)
 - Implemented `BookingProposal`, `BookingIssue`, `BookingValidation`, `BookingValidator`, and `validate_booking` in `backend/app/scheduling/validator.py`. Duration, lecturer, and roster come from the trusted occurrence; callers cannot override them or provide arbitrary booking exclusions.
 - Validate selected-week bounds, complete duration within opening hours, active/suitable/sufficient-capacity room, and room/lecturer/student overlap against fixed classes/reservations and meetings. Student conflicts compare actual UUID sets across intakes. Rejections report booking references and counts without listing private student UUIDs.
 - Preserve unrestricted start times, seconds/fractional seconds, adjacent classes, and no mandatory breaks. Rescheduling ignores only the selected occurrence's matching original class; a meeting with the same UUID is still checked. Cancelled demand must be explicitly reopened; duplicate scheduling is rejected.
@@ -243,3 +245,20 @@ Historical discussion; superseded by the implementation record below after the u
 - The configured live failed request was recorded in the actual console/file log, confirming end-to-end trace correlation. No SQL source changed; standalone SQL suites were not rerun. The existing HTTP integration fixtures execute real SQL locally. Postman CLI remains unavailable, so verification used those existing controlled HTTP fixtures rather than a CLI simulation.
 - Added [logging usage, privacy rules, and database setup diagnosis](scheduling-logging.md), including read-only existence SQL, prerequisite/snapshot migration links, and cache-refresh guidance. Updated API contract documentation, README, checklist, and simulation evidence. The current user's port-8000 process was not stopped or replaced; restart it to load backend changes. A temporary synthetic port-8001 service was used only for verification.
 - Final checks: confirmed all five events for the live failed diagnostic request exist in the file log; stopped the temporary port-8001 service without changing the user's server. Active and rotated log paths are Git-ignored. All 55 local links across five updated/new documentation files resolved; JavaScript syntax and `git diff --check` passed. Unrelated student-document working-tree edits were left untouched.
+
+## Step 4 backend-owned data loading — 11 November 2026
+
+- In response to the user's direction, moved scheduling snapshot retrieval and assembly out of the `load_scheduling_data` SQL function and into `backend/app/scheduling/loader.py`.
+- The backend now reads `teaching_occurrence_details`, `class_session_details`, `class_sessions`, `meeting_sessions`, `meeting_students`, `student_intakes`, `rooms`, and referenced `lecturers` using the existing server-only Supabase client. It filters by week, resolves exact intake/group rosters, attaches meeting attendees, preserves cross-intake conflicts, and paginates reads at 500 rows.
+- Removed the schedule path's RPC transport and RPC-specific `SCHEDULING_RPC_NOT_FOUND` branch. Safe logs identify the fixed read stage and row count or exception type, without query values, identifiers, rosters, credentials, or provider bodies.
+- The migration `202611100003_scheduling_snapshot.sql` remains in history, but backend generation no longer depends on it. Step 2's teaching-requirement migration/views and the existing source schema remain necessary.
+- **Consistency tradeoff:** independent PostgREST requests do not share one PostgreSQL MVCC snapshot. `captured_at` records the end of data collection; `database_snapshot` is now a descriptive capture marker, not a transaction snapshot ID. Step 10 must re-read and validate transactionally before any booking write.
+- Updated focused HTTP-provider fixtures and documentation. Tests and hosted database calls were not run for this implementation. Hosted permissions, required relation availability, and live scheduling behavior remain unverified.
+
+## Step 2 room-policy schema compatibility — 11 November 2026
+
+- The user requested completing Step 2 after `class_sections.required_room_type` had been removed and room suitability had moved into backend configuration.
+- Updated `202611100001_teaching_requirements.sql`: its metadata-protection trigger now protects only section offering/group metadata, and `teaching_occurrence_details` no longer selects `required_room_type`. The migration is designed to work whether the optional room-removal patch ran before or after it.
+- Updated `load_weekly_requirements` to explicitly select the Step 2 contract fields, so it works against either older views that still contain the legacy column or the updated view without it. Removed the legacy field from the `TeachingOccurrence` model; room policy remains solely in `Config/config.json` and the scheduling snapshot.
+- Updated Step 2 and database setup documentation. No database script was applied to a hosted project.
+- **Verification pending:** the migration, backend, and database tests were not run for this compatibility change. The migration should be applied once only after checking its dependent base tables; existing `teaching_plans`/`teaching_occurrences` or an existing Step 2 migration entry mean do not rerun it. See [weekly-plan setup](weekly-teaching-plans.md) and [room-field removal notes](required-room-type-removal.md).

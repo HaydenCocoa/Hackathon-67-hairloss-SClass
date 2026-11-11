@@ -1,5 +1,6 @@
 -- Step 2: weekly teaching demand, not timetable generation or booking validation.
 -- Apply once after schema.sql (or the membership/age upgrades) as postgres.
+-- Compatible with class_sections both before and after removal of required_room_type.
 begin;
 
 create table public.teaching_plans (
@@ -168,13 +169,14 @@ $$;
 create trigger sync_occurrence_booking after insert or update on public.class_sessions
 for each row execute function campus_private.sync_occurrence_booking();
 
--- Preserve the section, lecturer, course type and duration throughout a fixed plan.
+-- Preserve section, lecturer, course type, and duration throughout a fixed plan.
+-- Room suitability is owned by backend policy, not section metadata.
 create function campus_private.protect_planned_teaching_metadata()
 returns trigger language plpgsql security definer set search_path = '' as $$
 begin
   if tg_table_name = 'class_sections' then
-    if row(new.offering_id, new.group_number, new.required_room_type) is distinct from
-       row(old.offering_id, old.group_number, old.required_room_type)
+    if row(new.offering_id, new.group_number) is distinct from
+       row(old.offering_id, old.group_number)
        and exists (select 1 from public.teaching_plans where section_id = old.id) then
       raise exception 'Section teaching details are fixed while a teaching plan exists';
     end if;
@@ -217,7 +219,7 @@ select t.id as occurrence_id, t.plan_id, t.section_id, t.original_week_start, t.
   t.occurrence_number, t.requirement_status, p.timezone,
   cs.id as class_session_id, cs.status as booking_status, cs.starts_at, cs.room_id,
   (t.requirement_status = 'required' and (cs.id is null or cs.status = 'cancelled')) as needs_scheduling,
-  s.group_number, s.required_room_type, o.intake_id, o.lecturer_id,
+  s.group_number, o.intake_id, o.lecturer_id,
   c.id as course_id, c.course_code, c.name as course_name, c.course_type, c.duration_minutes
 from public.teaching_occurrences t
 join public.teaching_plans p on p.id = t.plan_id

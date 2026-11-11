@@ -2,7 +2,7 @@
 
 Date: 10 November 2026 (Asia/Kuala_Lumpur).
 
-Status: implemented locally. Hosted migration and entry of actual teaching periods are pending. No hosted database was contacted or changed.
+Status: implemented locally. On 11 November, the migration and reader were updated to remove legacy room-field dependencies; this compatibility edit has not yet been verified. Hosted migration and entry of actual teaching periods are pending. No hosted database was contacted or changed.
 
 ## Accepted requirement
 
@@ -30,7 +30,7 @@ Plan insertion creates all `week_count × occurrences_per_week` rows in `teachin
 
 The server-only `materialize_teaching_plan(plan_id)` function can repeat expansion safely. It inserts only missing identities and never resets cancellations or moves. Plan definitions and source occurrence identities are immutable after expansion, so retries cannot silently change the teaching requirement.
 
-Linked teaching metadata is protected to preserve the period's lecturer, course type, duration, group, and room requirement. Changing an already planned offering's lecturer or curriculum requires a deliberate future revision/versioning workflow; silently rewriting historical requirements is not supported. Because offerings are shared, protection applies while any plan remains attached, including an elapsed plan.
+Linked teaching metadata is protected to preserve the period's lecturer, course type, duration, and group. Room suitability is deliberately not stored on `class_sections`; the backend applies the configured course-to-room policy to the actual room inventory. Changing an already planned offering's lecturer or curriculum requires a deliberate future revision/versioning workflow; silently rewriting historical requirements is not supported. Because offerings are shared, protection applies while any plan remains attached, including an elapsed plan.
 
 ### Bookings, cancellation, and make-up demand
 
@@ -65,7 +65,7 @@ Multiple HTTP pages are not a transactionally consistent snapshot under concurre
 ## Setup and usage
 
 1. Apply the existing base schema, or the existing membership/age upgrades as appropriate.
-2. Run the entire `supabase/migrations/202611100001_teaching_requirements.sql` file **once** as `postgres` in the intended Supabase SQL Editor. Both new and existing databases need this migration; do not rerun `schema.sql` on an existing database.
+2. Run the entire `supabase/migrations/202611100001_teaching_requirements.sql` file **once** as `postgres` in the intended Supabase SQL Editor. Both new and existing databases need this migration; do not rerun `schema.sql` on an existing database. The migration works whether `class_sections.required_room_type` is still present or was already removed by `202611100002_remove_required_room_type.sql`.
 3. Identify an existing lecture or lab section and enter its actual first week, duration in weeks, and weekly count.
 
 Illustrative insert; replace the placeholder with a real section UUID:
@@ -110,6 +110,8 @@ App users have read-only access under existing section permissions; anonymous ac
 | `supabase/tests/teaching-requirements.test.cjs` | Local PostgreSQL recurrence, identity, lifecycle, legacy-data, and access checks |
 | `backend/tests/test_teaching_requirements.py` | Input validation and real HTTP reader tests against a synthetic local provider |
 
+The results below predate the 11 November room-field compatibility edit. They verify the earlier Step 2 migration/reader, not application after `required_room_type` has already been removed.
+
 Verified results:
 
 - **51** new teaching-requirement database checks passed.
@@ -140,7 +142,7 @@ For this task's temporary runtime, the Python command is `.\.python-tools\runtim
 ## Remaining work and related proposals
 
 - The user subsequently confirmed the existing database dataset is ready for the initial MVP; see [step 3 dataset scope](scheduling-dataset.md). Expanded scenario fixtures are deferred. The roster/resource snapshot, availability checks, candidate generation, CP-SAT, and authenticated write workflows remain future steps.
-- The separately documented [offering end-date and room-policy proposals](offering-end-dates-and-room-policy.md) remain under review. This migration retains `required_room_type` and does not introduce an offering end-date cutoff. If those proposals are accepted, use a coordinated later migration.
+- The offering end-date proposal remains deferred; no cutoff is introduced. The accepted room policy is implemented in backend configuration. The Step 2 migration neither selects nor protects a legacy `required_room_type` field, and its occurrence view omits it.
 - Explicit holiday dates remain in configuration. No automatic holiday or semester-break calendar is introduced, and calendar closures do not silently delete teaching demand.
 - Arbitrary weekly count changes and additional unscheduled classes beyond the fixed plan need a future exception/revision workflow. Current per-occurrence exceptions cover explicit cancellation and target-week movement.
 

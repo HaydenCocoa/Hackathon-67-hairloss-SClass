@@ -28,12 +28,12 @@ Use the server's configured solver budget, worker count, and seed initially. Thi
 
 **Implemented scope:** jointly schedule only pending occurrences for the selected intake and optional group targeting that week. Already booked classes, reservations, and meetings from every intake/group remain fixed constraints with their complete student attendance sets. Cancelled occurrences stay excluded. Unscheduled demand outside the selected scope is not assigned or treated as a reservation; separate unsaved previews can overlap until trusted saving is implemented.
 
-The existing loader still validates a complete weekly source snapshot before projecting its requirements to the selected scope. Therefore malformed source data outside the selected scope can still reject loading; scoped database loading is not implemented. The API does not add intake/group existence queries: a syntactically valid selection without pending demand returns `NO_PENDING_REQUIREMENTS`, including a valid-looking unknown ID/group. The page accepts database IDs directly rather than introducing a catalog endpoint.
+The backend reads and validates the complete week's source data through several direct PostgREST table/view requests before projecting requirements to the selected scope. Malformed source data outside the selected scope can still reject loading; scoped data loading is not implemented. The requests do not share a transaction snapshot. The API does not add intake/group existence queries: a syntactically valid selection without pending demand returns `NO_PENDING_REQUIREMENTS`, including a valid-looking unknown ID/group. The page accepts database IDs directly rather than introducing a catalog endpoint.
 
 ## Implemented execution flow
 
 1. Validate the exact date string, Monday boundary, and absence of extra fields; apply development access checks before loading scheduling data.
-2. Load one fresh, validated database snapshot with the configured calendar and room policy. Keep only selected requirements for the solver while preserving all fixed bookings, attendance sets, rooms, and opening windows. Derive a scope-bound revision from the source revision, intake ID and optional group; even empty selections have distinct revisions.
+2. Have the backend fetch weekly occurrences, overlapping class/meeting bookings, student memberships, rooms, and referenced lecturers directly from the existing Supabase tables/views. Validate and assemble the solver input, then keep only selected requirements while preserving all fixed bookings, attendance sets, rooms, and opening windows. Derive a scope-bound revision from the collected content, intake ID, and optional group; even empty selections have distinct revisions.
 3. Run the existing synchronous solver in an AnyIO worker so CPU work does not occupy the asynchronous request handler. Pass configured solver settings explicitly. One capacity slot covers the full load/solve/verify operation per process; further requests receive 429 with `Retry-After: 2`. Scoped cancellation is shielded while work finishes.
 4. Reuse the solver's complete-result and conflict verification. An internal verification failure must never become a successful preview.
 5. Return a typed response with safe diagnostics. Keep the operation read-only and document it in FastAPI `/docs`.
@@ -67,10 +67,10 @@ Placement instants retain the engine's UTC representation alongside the campus t
 | 429 | `GENERATION_BUSY`; another request occupies this process's generation slot |
 | 503 | `DATABASE_NOT_CONFIGURED` |
 | 504 | `DATABASE_TIMEOUT` |
-| 502 | `SCHEDULING_RPC_NOT_FOUND`, `DATABASE_PERMISSION_DENIED`, `DATABASE_SCHEMA_INCOMPLETE`, `DATABASE_UNAVAILABLE`, or a safe loader data code |
+| 502 | `DATABASE_UNAVAILABLE` for direct table/view read failures, or a safe loader data code |
 | 500 | `MODEL_INVALID` or `GENERATION_FAILED`; no assignments are returned |
 
-Non-validation errors have the shape `{"detail":{"code":"GENERATION_BUSY","message":"...","request_id":"..."}}`. Generation responses also carry `X-Request-ID`, including standard FastAPI validation errors. The page displays the ID for lookup in console traces or `logs/scheduling.log`. See [logging and confirmed RPC setup diagnosis](scheduling-logging.md). Error text never reflects raw provider responses, exception bodies, or rosters. Interactive request/response models and errors are available at `/docs`; the reusable generated contract is `/openapi.json`.
+Non-validation errors have the shape `{"detail":{"code":"GENERATION_BUSY","message":"...","request_id":"..."}}`. Generation responses also carry `X-Request-ID`, including standard FastAPI validation errors. The page displays the ID for lookup in console traces or `logs/scheduling.log`. See [scheduling logging and database-read diagnosis](scheduling-logging.md). Error text never reflects raw provider responses, exception bodies, or rosters. Interactive request/response models and errors are available at `/docs`; the reusable generated contract is `/openapi.json`.
 
 ## Preview lifetime and saving boundary
 
@@ -99,14 +99,14 @@ Invoke-RestMethod http://127.0.0.1:8000/api/health
 
 Use the existing healthy service, or identify and stop your previous development process before restarting it in your terminal. Do not stop an unidentified listener. Error 10013 can also result from another listener holding exclusive address access, so its permission wording alone does not establish a firewall or privilege problem; see [Microsoft's socket error definitions](https://learn.microsoft.com/en-us/windows/win32/winsock/windows-sockets-error-codes-2). On 10 November 2026 the reported startup failures were investigated: the listener was the development service previously started during this work, and health returned `ok`. No permission or firewall change was needed to establish the cause; the first failed bind was not separately reproduced.
 
-Live use needs the server-only Supabase settings, teaching plans/occurrences, roster/resource data, and the existing teaching-requirement/snapshot migrations. Missing or invalid inputs are reported; the page does not create data or apply migrations. The known broken local virtual-environment base interpreter can be replaced with the existing ignored `.python-tools/runtime/python.exe` for this workspace; restore/recreate the normal virtual environment for a portable setup.
+Live use needs the server-only Supabase settings, teaching plans/occurrences, roster/resource data, and the existing teaching-requirement migration/views. The backend reads those existing tables and views directly; it does not require `202611100003_scheduling_snapshot.sql`. Missing or invalid inputs are reported; the page does not create data or apply migrations. The known broken local virtual-environment base interpreter can be replaced with the existing ignored `.python-tools/runtime/python.exe` for this workspace; restore/recreate the normal virtual environment for a portable setup.
 
 ## Verification and reproducible UI checks
 
 - **47 focused logging/API tests passed**, including scoped generation and the original transport/privacy/error/access/concurrency guarantees, plus request correlation, safe error classification, and privacy-preserving console/file logging.
 - **248 full backend tests passed, 1 optional simulation test skipped**, in 99.50 seconds. One existing Starlette/httpx deprecation warning remains.
 - **12 Node/jsdom checks passed**, including the served page making a real intake-scoped HTTP request to a synthetic solver service, rendering a valid result followed by an empty week, and displaying classified errors with request IDs.
-- Native browser-app access approval previously timed out. These are DOM/HTTP checks, not a visual browser layout or browser security-policy verification. Subsequent read-only live RPC checks confirmed 404/PGRST202 and no returned snapshot; hosted generation is blocked until RPC setup/cache availability is corrected. No hosted migration/cache/grant/booking change was performed. The standalone SQL suites were not rerun because no SQL changed; integration fixtures execute existing real SQL locally. See [the logging diagnosis](scheduling-logging.md).
+- Native browser-app access approval previously timed out. These are DOM/HTTP checks, not a visual browser layout or browser security-policy verification. On 10 November, live RPC checks confirmed 404/PGRST202 for the now-unused RPC. The 11 November direct-table loader has not been run against hosted Supabase, so hosted permissions/behavior remain unverified. No hosted migration, grant, or booking was changed. See [the logging diagnosis](scheduling-logging.md).
 
 Run the backend tests with a working project Python environment:
 

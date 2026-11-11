@@ -38,14 +38,14 @@ Implementation and verification: [Teaching calendar](docs/backend/scheduling-cal
 
 ## 2. Describe which classes must happen
 
-**Status:** core weekly-recurrence requirements implemented locally on 10 November 2026; hosted migration is pending. See [implemented weekly teaching plans](docs/backend/weekly-teaching-plans.md) and the [original requirements discussion](docs/backend/teaching-requirements.md). Additional proposals below remain under review.
+**Status:** core weekly recurrence was implemented and verified on 10 November 2026. On 11 November, the migration and reader were updated to support databases where `class_sections.required_room_type` was removed; that compatibility update is not yet verified. Hosted migration is pending. See [implemented weekly teaching plans](docs/backend/weekly-teaching-plans.md) and the [original requirements discussion](docs/backend/teaching-requirements.md).
 
-The offering-date proposal is deferred. Required-room-type removal is accepted; [a SQL-only patch is prepared and verified](docs/backend/required-room-type-removal.md), but hosted execution and backend/seed adaptation remain pending. See the [earlier design assessment](docs/backend/offering-end-dates-and-room-policy.md).
+The offering-date proposal is deferred. Required-room-type removal is accepted; [a SQL-only patch is prepared and verified](docs/backend/required-room-type-removal.md), and the Step 2 migration/backend reader now work without the field. Hosted execution, legacy seed adaptation, and ERD updates remain pending; compatibility verification of the 11 November edit is also pending. See the [design assessment](docs/backend/offering-end-dates-and-room-policy.md).
 
 - [ ] Confirm the course-offering end date's inclusive local-date semantics, its relationship to teaching-plan bounds, and whether make-up classes require an explicit extension.
 - [ ] Obtain real offering end dates and define a safe backfill/update policy; do not infer them from intake codes or silently invalidate existing bookings.
 - [x] Prepare SQL for accepted `class_sections.required_room_type` removal, updating known views and trigger references; 25 local database checks passed.
-- [ ] Apply the room-type removal patch to the hosted database and adapt backend readers, old course seeds/migrations, fresh setup, and the ERD.
+- [ ] Apply the room-type removal patch to the hosted database; adapt old course seeds, fresh setup, and the ERD. Step 2's migration and backend reader now support both schema variants; verification of that update remains pending.
 - [x] Confirm and implement the system room policy for loading and validation: lectures use classrooms/auditoriums; tutorials and labs use classrooms/labs. Step 6 must reuse this captured policy for candidate generation.
 - [ ] Keep automatic public-holiday and semester-break handling deferred; continue respecting configured hours and explicit closures.
 
@@ -61,8 +61,11 @@ The offering-date proposal is deferred. Required-room-type removal is accepted; 
 - [x] Link bookings to occurrences without guessing links for existing bookings.
 - [x] Read all or only outstanding weekly requirements through an internal paginated backend function.
 - [x] Verify recurrence, lifecycle, access rules, and database-reader behavior locally.
+- [x] Remove room-suitability field dependencies from the Step 2 migration and keep the weekly reader selecting only the engine contract.
 
 Example: `Programming Lab / Group 1 / Week 3 / Occurrence 1`.
+
+The Step 2 room-field compatibility edit is documented but unverified; the historical passing counts above predate that edit. Do not rerun the migration if either teaching table already exists.
 
 **Complete when:** the backend can list exactly which occurrences require scheduling for a selected week, including replacements moved into that week, without duplicating existing or cancelled occurrences.
 
@@ -83,7 +86,7 @@ Dataset readiness is user-confirmed, not an independent live database audit. No 
 
 ## 4. Build the scheduling-data loader
 
-**Status:** complete and verified locally on 10 November 2026: 96 backend tests passed (1 optional simulation test skipped), and 258 database checks passed. Apply the new `202611100003_scheduling_snapshot.sql` migration before using the loader against Supabase. See [implementation and usage](docs/backend/scheduling-data-loader.md).
+**Status:** backend implementation updated on 11 November 2026 to read Supabase tables/views directly; verification is pending. The earlier 10 November implementation passed 96 backend tests (1 optional simulation test skipped) and 258 database checks, but those results cover the superseded RPC loader. The snapshot RPC migration is no longer required for backend generation. The teaching-requirement migration/views and existing source schema remain required. See [implementation and usage](docs/backend/scheduling-data-loader.md).
 
 - [x] Load weekly occurrences and expose only those still needing placement through `pending_requirements`.
 - [x] Resolve and validate the assigned lecturer identities.
@@ -94,7 +97,7 @@ Dataset readiness is user-confirmed, not an independent live database audit. No 
 - [x] Load scheduled class/meeting bookings and existing class reservations that overlap the week, including bookings beginning before it. Empty meeting data is valid.
 - [x] Derive class end times from course duration; use explicit meeting end times.
 - [x] Resolve configured opening windows and validate missing or inconsistent database input.
-- [x] Produce an immutable engine input using one read-only database snapshot and a content fingerprint.
+- [x] Produce an immutable engine input by paginated backend-owned PostgREST reads and a content fingerprint. Reads are separate requests, not one transaction snapshot; step 10 must revalidate transactionally.
 - [x] Support occurrence views before and after the room-requirement removal patch without inventing a new compatibility policy.
 
 | Input | What the loader must resolve |
@@ -194,9 +197,9 @@ Initial preference order:
 - [x] Make the operation usable through FastAPI's API documentation.
 - [x] Serve `/development/scheduling-test-hayden` with Monday/intake/group inputs, API submission, local-time preview table, diagnostics, errors, and raw JSON.
 - [x] Bound generation to one request per process and offload solver work so unrelated requests remain responsive.
-- [x] Add safe console/rotating-file traces and request IDs shown on the page, with actionable provider error categories. See [logging and RPC diagnosis](docs/backend/scheduling-logging.md).
+- [x] Add safe console/rotating-file traces and request IDs shown on the page, with per-stage direct-read tracing. See [scheduling logging](docs/backend/scheduling-logging.md).
 
-Latest verification after logging: **47 focused logging/API tests**, **248 full backend tests passed, 1 optional simulation test skipped**, and **12 DOM/page tests passed**, including request correlation/privacy and the existing scope/conflict/HTTP guarantees. Visual browser verification remains unverified after the earlier app-access approval timeout. A read-only live RPC check now confirms HTTP 404/PGRST202; hosted generation is blocked until the matching snapshot function is installed/visible in the schema cache. No hosted migration/cache/grant change was performed.
+Verification status on 11 November: code and HTTP-provider fixtures were updated for direct PostgREST reads, but the tests were not run for this implementation. The earlier 47 focused logging/API tests, 248 full backend tests (1 optional simulation skipped), and 12 DOM/page tests verify the previous RPC-backed implementation only. The previously observed PGRST202 concerned that removed RPC path; current hosted table/view permissions and preview behavior have not been checked. No hosted migration, schema, grant, or booking was changed.
 
 **Complete when:** timetable generation can be demonstrated through the API without a frontend or changes to actual bookings.
 

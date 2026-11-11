@@ -53,9 +53,6 @@ class TeachingOccurrence(BaseModel):
     room_id: UUID | None
     needs_scheduling: bool
     group_number: int = Field(gt=0)
-    # Transitional metadata only: the SQL removal patch omits this field.
-    # Course type and actual room inventory remain available to later policy.
-    required_room_type: Literal["classroom", "lab", "auditorium"] | None = None
     intake_id: UUID
     lecturer_id: UUID
     course_id: UUID
@@ -77,8 +74,10 @@ async def load_weekly_requirements(
     if isinstance(week_start, datetime) or week_start.weekday() != 0:
         raise ValueError("week_start must be a Monday date")
     params = [
-        # The fixed view can exist with or without the removed legacy column.
-        ("select", "*"),
+        # Select the scheduling contract explicitly; ignore a legacy room field if present in an older view.
+        ("select", "occurrence_id,plan_id,section_id,original_week_start,target_week_start,teaching_week_number,"
+                   "occurrence_number,requirement_status,timezone,class_session_id,booking_status,starts_at,room_id,"
+                   "needs_scheduling,group_number,intake_id,lecturer_id,course_id,course_code,course_name,course_type,duration_minutes"),
         ("target_week_start", f"eq.{week_start.isoformat()}"),
         ("order", "occurrence_id.asc"),
         ("limit", "500"),

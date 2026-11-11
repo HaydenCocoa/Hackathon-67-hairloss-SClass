@@ -2,7 +2,7 @@
 
 Date: 10 November 2026 (Asia/Kuala_Lumpur).
 
-The user accepted removing `class_sections.required_room_type`, deferred offering dates, and requested SQL for manual execution. No hosted execution or complete backend implementation was requested or performed.
+The user accepted removing `class_sections.required_room_type`, deferred offering dates, and requested SQL for manual execution. This note now records the compatibility update made on 11 November 2026: the Step 2 migration and weekly reader no longer depend on that field. No hosted execution was performed.
 
 [The complete SQL patch](../../supabase/migrations/202611100002_remove_required_room_type.sql) recreates the known timetable/occurrence views without the field, retaining security-invoker behavior and existing application-role read grants. It updates the optional teaching-plan protection function before dropping the column. It uses no CASCADE: unexpected dependencies cause rollback. Tables, bookings, actual room classification, group rules, and unrelated teaching metadata protections are preserved.
 
@@ -15,7 +15,7 @@ The core command alone is `alter table public.class_sections drop column if exis
 - The existing course seed inserts the removed field; adapt it before reuse.
 - Step 4 subsequently adapted the Python weekly reader and new snapshot loader to accept views with or without the removed field. See [loader compatibility and verification](scheduling-data-loader.md). Room-selection policy remains separate.
 - Step 5 adds the user-confirmed compatibility policy and booking checks; see [booking validation](booking-validation.md). Automatic candidate/room selection, older setup/seed compatibility, and ERD updates remain follow-up work.
-- The patch handles a base database without the optional teaching extension. However, an old teaching-requirement migration still references the removed field; do not apply that old migration after this patch without adapting it.
+- The Step 2 migration was updated to work both before and after this patch. It no longer references the removed field in the metadata-protection trigger or occurrence view. The backend weekly reader selects an explicit field list and never requests it.
 - Course-offering changes remain deferred. Calendar rules are unchanged.
 
 ## Verification

@@ -64,9 +64,13 @@ def test_real_http_snapshot_to_solver_preview_is_complete_private_and_read_only(
         private_roster_ids = {value for roster in before["rosters"] for value in roster["student_ids"]}
         assert all(value not in response.text for value in private_roster_ids)
     assert state["payload"] == before
-    assert len(state["calls"]) == 1  # Only read-only load RPC; no booking API.
-    assert state["calls"][0]["path"] == "/rest/v1/rpc/load_scheduling_data"
-    assert state["calls"][0]["parameters"]["p_week_start"] == WEEK["week_start"]
+    assert len(state["calls"]) > 1
+    assert all(call["path"].startswith("/rest/v1/") and "/rpc/" not in call["path"] for call in state["calls"])
+    assert all(call["path"] in {
+        "/rest/v1/teaching_occurrence_details", "/rest/v1/class_session_details", "/rest/v1/class_sessions",
+        "/rest/v1/meeting_sessions", "/rest/v1/meeting_students", "/rest/v1/student_intakes",
+        "/rest/v1/rooms", "/rest/v1/lecturers",
+    } for call in state["calls"])
 
 
 @pytest.mark.parametrize("body", [
@@ -249,7 +253,7 @@ def test_one_generation_at_a_time_and_health_responds_during_solve(provider, mon
             assert busy.status_code == 429
             assert busy.json()["detail"]["code"] == "GENERATION_BUSY"
             assert busy.headers["retry-after"] == "2"
-            assert len(state["calls"]) == 1
+            assert len(state["calls"]) > 1
         finally:
             release.set()
         assert future.result(timeout=5).status_code == 200
@@ -297,7 +301,7 @@ def test_page_assets_openapi_and_cors_are_available_without_frontend_build(provi
         response = client.post("/api/schedules/generate", json=WEEK, headers={"Origin": "http://localhost:5173"})
         assert response.status_code == 200
         assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
-    assert len(state["calls"]) == 1
+    assert len(state["calls"]) > 1
 
 
 @pytest.mark.parametrize("host", ["localhost", "[::1]"])
@@ -307,32 +311,26 @@ def test_loopback_hostname_and_ipv6_access(provider, host):
         assert client.get(preview.PAGE_PATH).status_code == 200
 
 
-@pytest.mark.parametrize("provider_code,expected", [
-    ("PGRST202", "SCHEDULING_RPC_NOT_FOUND"), ("42501", "DATABASE_PERMISSION_DENIED"),
-    ("42P01", "DATABASE_SCHEMA_INCOMPLETE"), ("UNTRUSTED-SECRET", "DATABASE_UNAVAILABLE"),
-    ({"unexpected": "SECRET"}, "DATABASE_UNAVAILABLE"),
-])
-def test_provider_error_is_classified_and_traced_without_private_bodies(provider, traces, provider_code, expected):
+@pytest.mark.parametrize("provider_status", [404, 401, 500])
+def test_table_read_error_is_traced_without_private_bodies(provider, traces, provider_status):
     settings, state = provider
-    state.update(status=404, body=json.dumps({"code": provider_code, "message": "PRIVATE-STUDENT-PAYLOAD",
+    state.update(status=provider_status, body=json.dumps({"code": "PRIVATE-CODE", "message": "PRIVATE-STUDENT-PAYLOAD",
                                              "details": "sb_secret_DO_NOT_LOG", "hint": "PRIVATE-STUDENT-PAYLOAD"}).encode())
     with client_for(settings) as client:
         response = client.post("/api/schedules/generate", json=WEEK, headers={"X-Request-ID": "injected-caller-value"})
         assert response.status_code == 502
         detail = response.json()["detail"]
-        assert detail["code"] == expected
+        assert detail["code"] == "DATABASE_UNAVAILABLE"
         trace_id = response.headers["x-request-id"]
         assert re.fullmatch("[0-9a-f]{32}", trace_id)
         assert detail["request_id"] == trace_id
         records = [item for item in traces if item["request_id"] == trace_id]
-        failed = next(item for item in records if item["event"] == "rpc_failed")
-        assert failed["provider_status"] == 404
-        assert failed["rpc"] == "load_scheduling_data"
-        assert failed["provider_code"] == (provider_code if expected != "DATABASE_UNAVAILABLE" else None)
+        failed = next(item for item in records if item["event"] == "snapshot_query_failed")
+        assert failed["stage"] == "load_requirements"
+        assert failed["provider_status"] == provider_status
+        assert failed["exception_type"] == "SupabaseReadError"
         assert records[-1]["event"] == "request_completed" and records[-1]["http_status"] == 502
         assert not any(item["event"] == "solver_started" for item in records)
-        if expected == "SCHEDULING_RPC_NOT_FOUND":
-            assert "202611100003_scheduling_snapshot.sql" in detail["message"]
         output = response.text + json.dumps(records)
         assert all(secret not in output for secret in ("PRIVATE-STUDENT-PAYLOAD", "sb_secret_DO_NOT_LOG", "injected-caller-value", "UNTRUSTED-SECRET"))
 
@@ -347,10 +345,10 @@ def test_success_and_validation_errors_have_separate_request_ids(provider, trace
         identifiers = [item.headers["x-request-id"] for item in (success, invalid, denied)]
         assert len(set(identifiers)) == 3
         selected = [item for item in traces if item["request_id"] == identifiers[0]]
-        assert {item["event"] for item in selected} >= {"request_started", "rpc_started", "rpc_completed", "snapshot_loaded", "solver_started", "solver_completed", "request_completed"}
+        assert {item["event"] for item in selected} >= {"request_started", "snapshot_query_started", "snapshot_query_completed", "snapshot_loaded", "solver_started", "solver_completed", "request_completed"}
         assert next(item for item in selected if item["event"] == "solver_completed")["placement_count"] == 1
         assert "X-Request-ID" in client.post("/api/schedules/generate", json={}, headers={"Origin": "http://localhost:5173"}).headers["access-control-expose-headers"]
-    assert len(state["calls"]) == 1
+    assert len(state["calls"]) > 1
     output = json.dumps(traces)
     assert "student_ids" not in output and "intake_id" not in output and "sb_secret_snapshot_test" not in output
 

@@ -1,8 +1,8 @@
 -- Run the whole patch as postgres in Supabase SQL Editor.
 -- Removes the column and its known view/trigger dependencies, preserving data.
 -- No CASCADE: unexpected dependencies stop and roll back this patch.
--- The backend requirements reader and old course seed still need adaptation
--- before they are used after this database-only change.
+-- The Step 2 migration and backend weekly reader support the removed column.
+-- The legacy course seed still needs adaptation before reuse after this patch.
 begin;
 
 do $$

@@ -32,23 +32,23 @@ assumptions:
     updated_at: "2026-11-10"
   - id: scheduling-snapshot-rpc
     status: supported
-    claim: Under the documented PostgREST RPC contract, the backend can POST a selected Monday and timezone and consume a single complete JSON scheduling snapshot from the local database function.
-    reason: PostgREST documents named JSON arguments for RPC POST. The new STABLE function resolves the payload under one database snapshot, and actual PostgreSQL output was consumed by the real backend transport over a controlled HTTP stand-in.
-    verification: On 2026-11-10, 32 snapshot SQL checks passed, along with 53 focused loader/weekly-reader tests and 96 full backend tests (one optional simulation check skipped). Assertions verify the single RPC path/body and synthetic authentication headers, roster resolution, week boundaries, immutability, fingerprints, schema-removal compatibility, malformed data, missing RPC, upstream failure, and timeout behavior. No Postman CLI simulation or live provider call was made; the CLI is unavailable. Owner-mock discovery was not performed.
+    claim: The historical snapshot RPC migration remains locally tested, but current backend schedule generation does not call it.
+    reason: On 2026-11-11, the user directed snapshot fetching and assembly to move into the backend. Generation now reads existing Supabase tables/views through paginated PostgREST requests; the RPC migration remains only as historical work.
+    verification: Before the refactor, 32 snapshot SQL checks, 53 loader/weekly-reader tests, and 96 full backend tests (one optional simulation skipped) validated the RPC implementation. Those results do not verify the new direct-read loader. The migration itself was not removed or changed in this refactor.
     source: https://docs.postgrest.org/en/stable/references/api/functions.html; https://www.postgresql.org/docs/current/xfunc-volatility.html; supabase/migrations/202611100003_scheduling_snapshot.sql; supabase/tests/scheduling-snapshot.test.cjs; backend/tests/test_scheduling_loader.py
     updated_at: "2026-11-10"
   - id: hosted-scheduling-snapshot-rpc
     status: unknown
-    claim: The intended hosted project has the step 4 function installed and its Data API permits the trusted backend key to invoke it.
-    reason: The new migration and role grants have only been verified locally. Hosted migration state and PostgREST schema-cache behavior have not been inspected by this task.
-    verification: Prepared an additive migration with explicit execute grants and a schema-cache reload notification. Apply it after the teaching-requirement migration and verify the real authorized call before claiming live readiness. Local tests do not establish hosted deployment or concurrent-transaction stress behavior.
+    claim: The intended hosted project's historical step 4 function state is unknown and is no longer needed by backend generation.
+    reason: Current code reads tables/views directly. Hosted migration state and PostgREST schema-cache behavior have not been inspected by this task.
+    verification: Prior read-only checks observed HTTP 404/PGRST202 for the old RPC. No hosted table/view request was made for direct reads. Do not apply the RPC migration solely to enable the current loader.
     source: supabase/migrations/202611100003_scheduling_snapshot.sql; docs/backend/scheduling-data-loader.md
     updated_at: "2026-11-10"
   - id: scheduling-preview-api
     status: supported
-    claim: The real FastAPI preview route loads one read-only snapshot RPC, runs the solver, and returns complete assignments or safe explicit outcomes without booking writes; the served page can ingest and render that response.
-    reason: Reused the existing local PostgreSQL-output HTTP stand-in because the Postman CLI is unavailable and its existing mock covers only the rooms probe. No live provider or owner mock discovery was performed.
-    verification: On 2026-11-10, 29 focused API tests and 230 full backend tests passed with one optional simulation test skipped. Assertions cover the read-only RPC path, complete results, no private roster IDs, failures and timeouts, input validation, local-development access guards, configured solver options, and bounded concurrent generation with responsive health checks. Ten Node/jsdom page checks passed, including actual served HTML/JS calling the API against a synthetic provider and rendering a solved week and an empty week. Browser app access approval timed out, so visual/browser verification is not claimed. No hosted migration or scheduling request was performed.
+    claim: The FastAPI preview route uses backend-owned table/view reads, runs the solver, and returns complete assignments or safe explicit outcomes without booking writes; the served page renders that response.
+    reason: The user requested direct backend-owned data access on 2026-11-11. Existing Supabase tables/views remain the data contract; the snapshot RPC is no longer called.
+    verification: On 2026-11-10, 29 focused API tests and 230 full backend tests passed with one optional simulation test skipped. Historical assertions cover the read-only RPC path, complete results, no private roster IDs, failures and timeouts, input validation, local-development access guards, configured solver options, and bounded concurrent generation with responsive health checks. Ten Node/jsdom page checks passed, including actual served HTML/JS calling the API against a synthetic provider and rendering a solved week and an empty week. Browser app access approval timed out, so visual/browser verification is not claimed. No hosted migration or scheduling request was performed.
     source: backend/tests/test_schedule_preview.py; backend/tests/schedule-preview-ui.test.cjs; backend/tests/serve_schedule_preview.py; docs/backend/schedule-preview-api.md
     updated_at: "2026-11-10"
   - id: scheduling-preview-intake-group-scope
@@ -60,9 +60,9 @@ assumptions:
     updated_at: "2026-11-10"
   - id: scheduling-rpc-tracing
     status: supported
-    claim: Scheduling requests correlate safe console/file events and API/page errors while distinguishing provider schema-cache, permission, and incomplete-schema failures.
-    reason: The reported 502/404 needed provider-code classification and request-stage context without logging private provider bodies or scheduling input.
-    verification: On 2026-11-10, 47 focused logging/API tests, 248 full backend tests (one optional simulation skipped), and 12 Node/jsdom page checks passed. Error injection verifies request IDs, recognized provider codes, privacy, stage ordering, and file/console logging. Read-only requests to the configured provider confirmed 404/PGRST202 and reproduced a correlated SCHEDULING_RPC_NOT_FOUND response without returning a snapshot. No hosted SQL/cache/grant/booking changes were made. The deployed matching RPC is unavailable through its schema cache; absence versus stale cache remains unresolved. Postman CLI remains unavailable.
+    claim: Scheduling requests correlate safe console/file events, per-stage backend reads, and API/page errors without logging private provider bodies or scheduling input.
+    reason: The loader uses multiple direct table/view reads, so request IDs and fixed read-stage names identify where a failure occurred.
+    verification: Prior logging tests validated request correlation and privacy for the RPC-backed implementation. They do not yet verify the new direct-read stage events; the updated test suite was not run. Postman CLI remains unavailable.
     source: backend/app/observability.py; backend/tests/test_observability.py; backend/tests/test_schedule_preview.py; docs/backend/scheduling-logging.md
     updated_at: "2026-11-10"
 fingerprints:

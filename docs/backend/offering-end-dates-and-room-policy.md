@@ -61,7 +61,7 @@ The tradeoff is less per-section flexibility. A future specialist lab or equipme
 - [Fresh schema](../../supabase/schema.sql): add the agreed date field and remove the room requirement only alongside its replacement behavior.
 - [Course seed](../../supabase/seed_courses.sql): supply agreed end dates and stop inserting/updating `required_room_type`.
 - `class_session_details` and any occurrence view: update exposed fields and add the offering boundary where needed.
-- [Draft teaching-plan migration](../../supabase/migrations/202611100001_teaching_requirements.sql): reconcile recurrence bounds; remove dependencies from the metadata-protection trigger and occurrence view. This review leaves the uncommitted draft unchanged.
+- [Teaching-plan migration](../../supabase/migrations/202611100001_teaching_requirements.sql): the later 11 November update removed `required_room_type` dependencies from the metadata-protection trigger and occurrence view. Offering end-date bounds remain deferred.
 - [Draft requirements loader](../../backend/app/scheduling/requirements.py): update its input/output contract and derive suitability through the shared policy rather than a mandatory section field.
 - SQL/Python fixtures, integration checks, schema upgrades, ERD documentation, and downstream readers need coordinated changes. Already-applied migrations should be followed by a new upgrade rather than rewritten.
 - [Development checklist](../../task_hayden.md): decisions are pending; implementation and verification remain unchecked.

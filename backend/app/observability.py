@@ -17,7 +17,7 @@ LOGGER = logging.getLogger("sclass.scheduling")
 REQUEST_ID: ContextVar[str] = ContextVar("scheduling_request_id", default="-")
 _SETUP_LOCK = Lock()
 _FIELDS = {"http_status", "provider_status", "provider_code", "rpc", "stage", "duration_ms", "code",
-           "pending_count", "placement_count", "status", "exception_type", "frames"}
+           "pending_count", "placement_count", "row_count", "status", "exception_type", "frames"}
 
 
 class TraceFormatter(logging.Formatter):
