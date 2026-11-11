@@ -38,17 +38,13 @@ Implementation and verification: [Teaching calendar](docs/backend/scheduling-cal
 
 ## 2. Describe which classes must happen
 
-**Status:** core weekly recurrence was implemented and verified on 10 November 2026. On 11 November, the migration and reader were updated to support databases where `class_sections.required_room_type` was removed; that compatibility update is not yet verified. Hosted migration is pending. See [implemented weekly teaching plans](docs/backend/weekly-teaching-plans.md) and the [original requirements discussion](docs/backend/teaching-requirements.md).
+**Status:** complete, confirmed by the user on 11 November 2026. Core weekly recurrence was implemented and verified locally on 10 November. On 11 November, the migration and reader were updated to support databases where `class_sections.required_room_type` was removed; no automated test results are recorded for that edit. See [implemented weekly teaching plans](docs/backend/weekly-teaching-plans.md) and the [original requirements discussion](docs/backend/teaching-requirements.md).
 
-The offering-date proposal is deferred. Required-room-type removal is accepted; [a SQL-only patch is prepared and verified](docs/backend/required-room-type-removal.md), and the Step 2 migration/backend reader now work without the field. Hosted execution, legacy seed adaptation, and ERD updates remain pending; compatibility verification of the 11 November edit is also pending. See the [design assessment](docs/backend/offering-end-dates-and-room-policy.md).
+Required-room-type removal is accepted; [a SQL-only patch is prepared and verified](docs/backend/required-room-type-removal.md), and the Step 2 migration/backend reader work with or without the field. See the [design assessment](docs/backend/offering-end-dates-and-room-policy.md).
 
-- [ ] Confirm the course-offering end date's inclusive local-date semantics, its relationship to teaching-plan bounds, and whether make-up classes require an explicit extension.
-- [ ] Obtain real offering end dates and define a safe backfill/update policy; do not infer them from intake codes or silently invalidate existing bookings.
 - [x] Prepare SQL for accepted `class_sections.required_room_type` removal, updating known views and trigger references; 25 local database checks passed.
-- [ ] Apply the room-type removal patch to the hosted database; adapt old course seeds, fresh setup, and the ERD. Step 2's migration and backend reader now support both schema variants; verification of that update remains pending.
 - [x] Confirm and implement the system room policy for loading and validation: lectures use classrooms/auditoriums; tutorials and labs use classrooms/labs. Step 6 must reuse this captured policy for candidate generation.
-- [ ] Keep automatic public-holiday and semester-break handling deferred; continue respecting configured hours and explicit closures.
-
+- [x] Keep automatic public-holiday and semester-break handling deferred; continue respecting configured hours and explicit closures.
 - [x] Maintain recurring teaching plans in the database, as confirmed by the user.
 - [x] Resolve teaching weeks from each section's first Monday and week count; starts can differ across sections/intakes.
 - [x] Automatically materialize required teaching occurrences when a plan is added.
@@ -65,7 +61,13 @@ The offering-date proposal is deferred. Required-room-type removal is accepted; 
 
 Example: `Programming Lab / Group 1 / Week 3 / Occurrence 1`.
 
-The Step 2 room-field compatibility edit is documented but unverified; the historical passing counts above predate that edit. Do not rerun the migration if either teaching table already exists.
+The historical passing counts predate the 11 November room-field compatibility edit. Do not rerun the migration if either teaching table already exists.
+
+Deferred follow-ups. These do not block Step 2:
+
+- [ ] Confirm the course-offering end date's inclusive local-date semantics, its relationship to teaching-plan bounds, and whether make-up classes require an explicit extension.
+- [ ] Obtain real offering end dates and define a safe backfill/update policy; do not infer them from intake codes or silently invalidate existing bookings.
+- [ ] Apply the room-type removal patch to the hosted database if not already done; adapt old course seeds, fresh setup, and the ERD.
 
 **Complete when:** the backend can list exactly which occurrences require scheduling for a selected week, including replacements moved into that week, without duplicating existing or cancelled occurrences.
 

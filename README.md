@@ -88,7 +88,7 @@ Apply [the teaching-requirement migration](supabase/migrations/202611100001_teac
 
 The internal `load_weekly_requirements` function reads the selected target week's requirements from `teaching_occurrence_details`, including explicit make-up requirements. It can return only lessons still needing placement. No schedule-generation or plan-management API is introduced in this step.
 
-See [teaching-plan setup and behavior](docs/backend/weekly-teaching-plans.md). The migration is verified locally; applying it to a hosted project and entering actual teaching periods remain setup actions.
+See [teaching-plan setup and behavior](docs/backend/weekly-teaching-plans.md). Step 2 is complete. The migration works with or without the removed `required_room_type` column. On a new database, apply it once and enter actual teaching periods.
 
 ## Scheduling input loader
 

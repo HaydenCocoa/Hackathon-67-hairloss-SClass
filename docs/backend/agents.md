@@ -36,7 +36,7 @@ The existing backend provides health/configuration checks, a Supabase read-conne
 
 Step 1 now adds validated scheduling settings, a reusable calendar helper, and initialization on FastAPI app state. Invalid calendar settings fail startup. The helper accepts arbitrary start timestamps and checks the complete interval against configured local opening hours. It does not generate classes or check lecturer/student/room conflicts.
 
-Step 2 adds database-defined weekly teaching plans, automatic expansion into stable occurrences, optional booking links, cancellation/move integrity, and an internal paginated weekly-demand reader. The original design was verified locally; the 11 November compatibility edit for databases without `required_room_type` has not yet been verified or applied to a hosted project. See [implemented weekly teaching plans](weekly-teaching-plans.md) for setup, interfaces, decisions, and limits.
+Step 2 adds database-defined weekly teaching plans, automatic expansion into stable occurrences, optional booking links, cancellation/move integrity, and an internal paginated weekly-demand reader. It works with or without `class_sections.required_room_type`. The user confirmed Step 2 complete on 11 November 2026. The original design was verified locally on 10 November; this record holds no automated test results for the 11 November compatibility edit. See [implemented weekly teaching plans](weekly-teaching-plans.md) for setup, interfaces, decisions, and limits.
 
 Steps 4-7 add the validated weekly snapshot, shared booking validator, unrestricted candidate ranges, and complete CP-SAT feasibility generation with post-solve verification. Step 8 quality optimization is postponed. Step 9 exposes read-only generation through a local-development HTTP API and a service-hosted test page; these are verified locally. Authentication and transactional booking commits remain future work.
 
@@ -49,7 +49,7 @@ No database schema or hosted data was changed for step 1. No frontend change was
 | Step | Requirement and completion target | Status |
 | --- | --- | --- |
 | 1 | Configurable teaching calendar and reusable full-interval eligibility check | Complete; verified |
-| 2 | Database-backed weekly teaching requirements and stable occurrences, with cancellation and replacement tracking | Migration updated on 11 Nov to support the removed room field; verification pending; hosted migration pending |
+| 2 | Database-backed weekly teaching requirements and stable occurrences, with cancellation and replacement tracking | Complete; confirmed by the user on 11 Nov. Original design verified locally; no automated results recorded for the 11 Nov room-field compatibility edit |
 | 3 | Use existing database scheduling inputs; defer meeting and impossible-arrangement fixtures for the initial MVP | Complete based on user confirmation; no new runtime code |
 | 4 | Backend loader reads existing scheduling data and builds a validated engine snapshot | Backend implementation updated to direct PostgREST reads on 11 Nov; verification pending |
 | 5 | Explainable room, lecturer, student, and reservation conflict validation | Complete and verified locally; no new migration |
@@ -261,4 +261,11 @@ Historical discussion; superseded by the implementation record below after the u
 - Updated `202611100001_teaching_requirements.sql`: its metadata-protection trigger now protects only section offering/group metadata, and `teaching_occurrence_details` no longer selects `required_room_type`. The migration is designed to work whether the optional room-removal patch ran before or after it.
 - Updated `load_weekly_requirements` to explicitly select the Step 2 contract fields, so it works against either older views that still contain the legacy column or the updated view without it. Removed the legacy field from the `TeachingOccurrence` model; room policy remains solely in `Config/config.json` and the scheduling snapshot.
 - Updated Step 2 and database setup documentation. No database script was applied to a hosted project.
-- **Verification pending:** the migration, backend, and database tests were not run for this compatibility change. The migration should be applied once only after checking its dependent base tables; existing `teaching_plans`/`teaching_occurrences` or an existing Step 2 migration entry mean do not rerun it. See [weekly-plan setup](weekly-teaching-plans.md) and [room-field removal notes](required-room-type-removal.md).
+- **Verification at the time:** the migration, backend, and database tests were not run for this compatibility change. The migration should be applied once only after checking its dependent base tables; existing `teaching_plans`/`teaching_occurrences` or an existing Step 2 migration entry mean do not rerun it. See [weekly-plan setup](weekly-teaching-plans.md) and [room-field removal notes](required-room-type-removal.md).
+
+## Step 2 completion — 11 November 2026
+
+- The user confirmed that Step 2 is complete and asked for the documentation to be updated. Updated the roadmap, the checklist, the weekly-plan notes, the room-field removal notes and the root README.
+- Completion rests on the user's confirmation. This documentation-only task did not run the backend or database suites, query the hosted project, or apply any SQL. The user chose not to run the test suite in this session. The latest automated Step 2 results (16 focused reader, 59 full backend, 201 database checks) still predate the 11 November compatibility edit.
+- Deferred items are follow-ups, not blockers for Step 2: offering end dates, automatic holiday/semester-break handling, applying `202611100002_remove_required_room_type.sql` to the hosted database, adapting the legacy course seed and fresh setup, and updating the ERD.
+- Step 4's direct-read loader and the Step 9 preview that depends on it still need verification.

@@ -15,7 +15,7 @@ The core command alone is `alter table public.class_sections drop column if exis
 - The existing course seed inserts the removed field; adapt it before reuse.
 - Step 4 subsequently adapted the Python weekly reader and new snapshot loader to accept views with or without the removed field. See [loader compatibility and verification](scheduling-data-loader.md). Room-selection policy remains separate.
 - Step 5 adds the user-confirmed compatibility policy and booking checks; see [booking validation](booking-validation.md). Automatic candidate/room selection, older setup/seed compatibility, and ERD updates remain follow-up work.
-- The Step 2 migration was updated to work both before and after this patch. It no longer references the removed field in the metadata-protection trigger or occurrence view. The backend weekly reader selects an explicit field list and never requests it.
+- The Step 2 migration was updated to work both before and after this patch. It no longer references the removed field in the metadata-protection trigger or occurrence view. The backend weekly reader selects an explicit field list and never requests it. The user confirmed Step 2 complete on 11 November 2026. Applying this patch to the hosted database, adapting the seed and updating the ERD remain separate follow-ups.
 - Course-offering changes remain deferred. Calendar rules are unchanged.
 
 ## Verification

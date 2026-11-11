@@ -2,7 +2,7 @@
 
 Date: 10 November 2026 (Asia/Kuala_Lumpur).
 
-Status: implemented locally. On 11 November, the migration and reader were updated to remove legacy room-field dependencies; this compatibility edit has not yet been verified. Hosted migration and entry of actual teaching periods are pending. No hosted database was contacted or changed.
+Status: complete, confirmed by the user on 11 November 2026. On 11 November, the migration and reader were updated to remove legacy room-field dependencies. The automated results below predate that edit, and no new test results were recorded at completion. The assistant did not contact or change any hosted database.
 
 ## Accepted requirement
 
@@ -110,7 +110,7 @@ App users have read-only access under existing section permissions; anonymous ac
 | `supabase/tests/teaching-requirements.test.cjs` | Local PostgreSQL recurrence, identity, lifecycle, legacy-data, and access checks |
 | `backend/tests/test_teaching_requirements.py` | Input validation and real HTTP reader tests against a synthetic local provider |
 
-The results below predate the 11 November room-field compatibility edit. They verify the earlier Step 2 migration/reader, not application after `required_room_type` has already been removed.
+The results below predate the 11 November room-field compatibility edit. They verify the earlier Step 2 migration/reader, not application after `required_room_type` has already been removed. Step 2 was marked complete on the user's confirmation, without rerunning these suites.
 
 Verified results:
 
