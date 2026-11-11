@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en" data-timezone="__CAMPUS_TIMEZONE__">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SClass · Scheduling test</title>
+  <link rel="stylesheet" href="/development/scheduling-test-hayden/style.css">
+  <script src="/development/scheduling-test-hayden/app.js" defer></script>
+</head>
+<body>
+  <main>
+    <header><span class="eyebrow">SCLASS / DEVELOPMENT</span><h1>Scheduling preview</h1>
+      <p>Generate pending classes for one intake or group. Existing bookings stay fixed.</p>
+    </header>
+    <section class="panel" aria-labelledby="generate-heading">
+      <h2 id="generate-heading">Choose a teaching week</h2>
+      <form id="generate-form">
+        <div><label for="week-start">Week starting Monday</label><input id="week-start" name="week_start" type="date" required></div>
+        <div><label for="intake-id">Intake ID</label><input id="intake-id" name="intake_id" type="text" required placeholder="Intake UUID" aria-describedby="intake-help"><small id="intake-help">Use the intake's ID from the database.</small></div>
+        <div><label for="group-number">Group (optional)</label><input id="group-number" name="group_number" type="number" min="1" step="1" placeholder="All groups" aria-describedby="group-help"><small id="group-help">Leave empty for all groups in this intake.</small></div>
+        <button id="generate" type="submit">Generate preview</button>
+      </form>
+      <p class="notice">Preview only · No bookings are saved · Gap and room-use optimization is postponed</p>
+    </section>
+    <p id="status" role="status" aria-live="polite">Select a Monday and intake to begin.</p>
+    <section id="result" hidden aria-label="Generated preview">
+      <div id="summary" class="summary"></div>
+      <section class="panel"><h2>Proposed classes</h2><p class="muted">New assignments only. Times use the campus timezone; existing bookings are not listed here.</p>
+        <p id="empty" hidden></p>
+        <div class="table-wrap"><table id="schedule"><caption id="schedule-caption">Weekly class preview</caption><thead><tr><th scope="col">Day &amp; date</th><th scope="col">Time</th><th scope="col">Class</th><th scope="col">Group / intake</th><th scope="col">Room</th><th scope="col">Lecturer</th><th scope="col">Students</th></tr></thead><tbody id="schedule-body"></tbody></table></div>
+      </section>
+      <section class="panel"><h2>Diagnostics</h2><ul id="diagnostics"></ul><p id="revision" class="muted revision"></p></section>
+      <details class="panel"><summary>Raw API response</summary><pre id="raw"></pre></details>
+    </section>
+    <footer><a href="/docs" target="_blank" rel="noopener">API documentation ↗</a><span>Local development · Hayden</span></footer>
+  </main>
+</body>
+</html>

@@ -66,6 +66,20 @@ Run [seed_lecturers.sql](seed_lecturers.sql) in the SQL Editor after creating th
 
 Rerunning updates the sample names while preserving existing lecturer UUIDs and linked accounts. The final query lists all 20 records for inspection.
 
+## Courses for APU1F2611CS(SE)
+
+Run [seed_courses.sql](seed_courses.sql) as `postgres` in the SQL Editor after `schema.sql` and `seed_lecturers.sql`. It creates the intake with one group if missing, then creates these course components, intake offerings, and Group 1 class sections:
+
+| Course code | Subject | Components | Lecturer | Duration of each component |
+| --- | --- | --- | --- | ---: |
+| CS101-PYP | Introduction to Programming | Lecture + lab | LEC001 - Ahmad Hakim | 120 minutes |
+| CS101-IN | Introduction to Networking | Lecture + lab | LEC002 - Siti Aisyah | 120 minutes |
+| CS101-ISE | Introduction to Software Engineering | Lecture + tutorial | LEC003 - Muhammad Farhan | 120 minutes |
+
+Both components of each subject use the same lecturer. Lectures and the tutorial require a classroom; labs require a lab. There are six course rows because teaching type is part of the course identity, with six intake offerings and six Group 1 sections. Dated class sessions are scheduled later.
+
+The script is atomic, uses no temporary tables, and can be rerun while preserving existing course/offering/section UUIDs. Rerunning refreshes the listed course names/durations and the target intake's lecturer and room-type assignments. A missing lecturer or a conflicting duration protected by existing sessions causes rollback. The final query lists all six components for inspection.
+
 ## Sample students and intakes
 
 Run [seed_students.sql](seed_students.sql) after creating or upgrading the schema (including the age migration). It creates or updates 18 intake codes and generates **1,000 unique student identities with 1,480 memberships**, arranged as the twelve cohorts below. Codes remain `TP000001` through `TP001000`, with distinct generated names and integer ages 18 through 25 (125 students per age).
@@ -111,6 +125,12 @@ You can then rerun `seed_students.sql` to recreate the sample students and their
 
 ## Scheduling work to add next
 
+The historical [migrations/202611100003_scheduling_snapshot.sql](migrations/202611100003_scheduling_snapshot.sql) adds an optional server-side snapshot RPC. Current schedule generation reads existing tables and views directly from the backend and does not require this migration. See [loader setup, consistency limits, and validation](../docs/backend/scheduling-data-loader.md).
+
+Weekly demand is available through [migrations/202611100001_teaching_requirements.sql](migrations/202611100001_teaching_requirements.sql). Apply it **once after the base schema** (or the existing membership/age upgrades); do not rerun the initial schema. It works whether the optional `202611100002_remove_required_room_type.sql` patch has been applied or not. It adds `teaching_plans`, `teaching_occurrences`, an optional occurrence link on `class_sessions`, and the `teaching_occurrence_details` view without using the legacy room field. Existing data is retained. See [setup and usage](../docs/backend/weekly-teaching-plans.md).
+
+Create a plan for each lecture/lab section with its first Monday, number of weeks, and occurrences per week. Plan insertion creates required lessons without assigning times or rooms. The SQL Editor and trusted server role can maintain these records; application users retain read-only access. No hosted migration or production teaching-plan data has been applied by this task.
+
 The schema does **not yet reject overlapping bookings or unsuitable/undersized rooms**. It also does not automatically insert change-history rows. The next step is a trusted scheduling operation that checks room, lecturer, and student availability across **both** session tables and **all** student intake memberships, handles simultaneous requests, and saves the booking and history together. Derive class rosters from matching `student_intakes.intake_id` and `group_number` rather than fields on `students`.
 
 For that reason, this initial script grants app users **read access only**, including users represented in `admins`. Use the SQL Editor for initial data entry. Add narrowly scoped, authorized scheduling functions and admin operations before enabling app writes. A trusted server using `service_role` bypasses RLS and must perform its own authorization; never put that key in the browser.
@@ -132,7 +152,17 @@ npm install --prefix .sql-tools --no-save --package-lock=false @electric-sql/pgl
 $env:NODE_PATH = Join-Path (Get-Location).Path '.sql-tools/node_modules'
 node supabase/tests/schema.test.cjs
 node supabase/tests/memberships.test.cjs
+node supabase/tests/courses.test.cjs
+node supabase/tests/teaching-requirements.test.cjs
+node supabase/tests/room-type-removal.test.cjs
+node supabase/tests/scheduling-snapshot.test.cjs
 ```
+
+The course seed additionally passed 20 checks against the current schema, covering the six teaching components, 120-minute durations, paired lecturer assignments, room types, rollback on missing lecturers, preservation of IDs on rerun, and preservation of scheduled sessions.
+
+The teaching-requirement migration passed 51 additional checks covering weekly expansion, stable identities, repeated materialization, period boundaries, cancellation, make-up demand, booking linkage, timezone week mapping, preserved legacy data, protected teaching metadata, and role-based access. All four suites passed together during step 2 verification (201 database checks total). This remains local PostgreSQL verification with mocked Auth, not a hosted deployment or concurrent-transaction stress test.
+
+Step 4 verification also passed 25 room-removal checks and 32 snapshot checks, bringing all six suites to 258 passing database checks. Snapshot coverage includes deduplicated cross-intake rosters, complete weekly input, derived end times, boundary overlaps, cancelled-booking exclusion, read-only access, role grants, and compatibility with the room-removal patch. Synthetic fixtures are local test data and are not inserted into the hosted dataset.
 
 `tests/fixtures/legacy_schema.sql` is an archived test fixture used only to validate the upgrade. It is not a setup script for your project.
 

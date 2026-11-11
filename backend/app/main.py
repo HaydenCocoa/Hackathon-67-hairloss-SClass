@@ -12,6 +12,9 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import AppSettings, PROJECT_ROOT, Settings, load_settings
 from .database import DatabaseHealth, check_database
+from .observability import SchedulingTraceMiddleware, configure_scheduling_logging
+from .scheduling.calendar import TeachingCalendar
+from .scheduling.preview import create_preview_router
 from .student import create_student_router
 from .lecturer import create_lecturer_router
 
@@ -23,16 +26,20 @@ def create_app(settings: Settings | None = None, frontend_dist: Path | None = No
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        configure_scheduling_logging()
         async with httpx.AsyncClient(follow_redirects=False) as client:
             app.state.http_client = client
             yield
 
     app = FastAPI(title=f"{settings.app.name} API", version="0.1.0", lifespan=lifespan)
+    app.state.teaching_calendar = TeachingCalendar(settings.scheduling)
+    app.add_middleware(SchedulingTraceMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.server.cors_origins,
-        allow_methods=["GET"],
+        allow_methods=["GET", "POST"],
         allow_headers=["Accept", "Content-Type"],
+        expose_headers=["X-Request-ID"],
     )
 
     @app.get("/api/health")
@@ -51,6 +58,7 @@ def create_app(settings: Settings | None = None, frontend_dist: Path | None = No
 
     # Student Page (Bi Jin): profile + weekly timetable
     app.include_router(create_student_router(settings.supabase))
+    app.include_router(create_preview_router(settings))
 
     app.include_router(create_lecturer_router(settings.supabase))
 

@@ -97,6 +97,14 @@ class Timetable(BaseModel):
 
 # ---------- Supabase helpers ----------
 
+class SupabaseReadError(HTTPException):
+    """Safe table-read failure with the upstream status retained for tracing."""
+
+    def __init__(self, table: str, provider_status: int):
+        self.provider_status = provider_status
+        super().__init__(502, f"Supabase could not read '{table}' (HTTP {provider_status}).")
+
+
 class Supabase:
     def __init__(self, settings: SupabaseSettings, client: httpx.AsyncClient):
         self.url = os.getenv(settings.url_env, "").strip().rstrip("/")
@@ -119,7 +127,7 @@ class Supabase:
         except httpx.RequestError:
             raise HTTPException(502, "Could not reach Supabase. Check the project URL and network.")
         if response.status_code != 200:
-            raise HTTPException(502, f"Supabase could not read '{table}' (HTTP {response.status_code}).")
+            raise SupabaseReadError(table, response.status_code)
         try:
             body = response.json()
         except ValueError:
@@ -127,7 +135,6 @@ class Supabase:
         if not isinstance(body, list):
             raise HTTPException(502, "Supabase returned an unexpected response.")
         return body
-
 
 def in_list(values) -> str:
     # IDs come from our own database (UUIDs), so quoting is enough.

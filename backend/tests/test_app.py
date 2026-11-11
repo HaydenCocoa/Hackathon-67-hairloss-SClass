@@ -70,6 +70,16 @@ def test_missing_credentials_does_not_block_boot(settings):
         assert response.json()["status"] == "not_configured"
 
 
+def test_startup_uses_configured_teaching_calendar(settings):
+    from datetime import date
+
+    settings.scheduling.opening_hours["monday"].opens_at = "09:17"
+    app = create_app(settings)
+    opens_at, closes_at = app.state.teaching_calendar.opening_window(date(2026, 11, 9))
+    assert opens_at.isoformat() == "2026-11-09T09:17:00+08:00"
+    assert closes_at.isoformat() == "2026-11-09T18:00:00+08:00"
+
+
 @pytest.mark.parametrize("key", ["sb_secret_test-only", "eyJtest-legacy-key"])
 def test_query_uses_real_http_and_keeps_rows_private(settings, upstream, monkeypatch, key):
     url, state = upstream

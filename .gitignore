@@ -14,6 +14,8 @@ __pycache__/
 node_modules/
 frontend/dist/
 *.log
+logs/
 .sql-tools/
+.python-tools/
 .DS_Store
 .vscode/
