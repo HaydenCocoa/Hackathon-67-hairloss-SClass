@@ -57,7 +57,11 @@ function showToast(text) {
 }
 
 async function loadLecturers() {
-  lecturersError.value = ''
+  lecturers.value = [
+    { id: '3f552573-e5d9-4900-8213-b07fbef13c68', name: 'Ahmad Hakim' }
+  ];
+  lecturerId.value = '3f552573-e5d9-4900-8213-b07fbef13c68';
+    
   try {
     lecturers.value = await listLecturers()
     let saved = ''
