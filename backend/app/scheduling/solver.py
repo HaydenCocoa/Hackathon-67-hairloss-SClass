@@ -156,7 +156,9 @@ def _build_model(snapshot: SchedulingSnapshot, candidates: WeeklyCandidates) -> 
     return model, decisions
 
 
-def _verify_placements(snapshot: SchedulingSnapshot, placements: tuple[ClassPlacement, ...]) -> None:
+def verify_placements(snapshot: SchedulingSnapshot, placements: tuple[ClassPlacement, ...]) -> None:
+    """Raise unless placements cover every pending lesson once, each passes
+    booking validation, and no two of them share a room, lecturer or student."""
     pending = {item.occurrence_id: item for item in snapshot.pending_requirements}
     if len(placements) != len(pending) or {item.occurrence_id for item in placements} != set(pending):
         raise ScheduleVerificationError("Solver output does not cover every pending lesson exactly once")
@@ -175,6 +177,10 @@ def _verify_placements(snapshot: SchedulingSnapshot, placements: tuple[ClassPlac
             if (left.room_id == right.room_id or left.lecturer_id == right.lecturer_id
                     or pending[left.occurrence_id].student_ids & pending[right.occurrence_id].student_ids):
                 raise ScheduleVerificationError("Generated lessons overlap for shared resources")
+
+
+# Original private name, kept for existing callers and tests.
+_verify_placements = verify_placements
 
 
 def solve_weekly_schedule(snapshot: SchedulingSnapshot, options: SolverSettings | None = None) -> ScheduleResult:

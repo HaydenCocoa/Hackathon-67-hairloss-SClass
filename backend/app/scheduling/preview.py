@@ -1,4 +1,7 @@
-"""Development-only, read-only HTTP orchestration for weekly scheduling."""
+"""Development-only HTTP orchestration for weekly scheduling.
+
+`generate` is read-only. `save` (step 10) writes the reviewed preview to
+class_sessions after rechecking it against fresh data."""
 
 import hashlib
 import json
@@ -17,9 +20,10 @@ from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..config import CourseType, Settings
-from ..student import Supabase
+from ..student import Supabase, SupabaseWriteError
 from ..observability import REQUEST_ID, event, safe_frames
 from .loader import SchedulingDataError, SchedulingSnapshot, load_scheduling_snapshot
+from .save import MAX_PLACEMENTS, SavedClass, SavePlacement, SaveRejected, SaveResult, prepare_rows
 from .solver import ClassPlacement, ScheduleResult, solve_weekly_schedule
 
 ASSETS = Path(__file__).resolve().parent / "development"
@@ -51,6 +55,13 @@ class GenerationRequest(BaseModel):
         return value
 
 
+class SaveRequest(GenerationRequest):
+    """The preview being saved: the same week/intake/group, its revision, and its classes."""
+    snapshot_revision: str = Field(pattern=r"^[0-9a-f]{64}$", description="snapshot_revision from the preview")
+    placements: list[SavePlacement] = Field(min_length=1, max_length=MAX_PLACEMENTS,
+                                            description="Every placement from the preview, unchanged")
+
+
 class PreviewPlacement(ClassPlacement):
     course_code: str
     course_name: str
@@ -80,8 +91,8 @@ class PreviewError(BaseModel):
     detail: PreviewErrorDetail
 
 
-def failure(status: int, code: str, message: str) -> HTTPException:
-    event("generation_rejected", level=logging.WARNING, http_status=status, code=code)
+def failure(status: int, code: str, message: str, name: str = "generation_rejected") -> HTTPException:
+    event(name, level=logging.WARNING, http_status=status, code=code)
     return HTTPException(status, {"code": code, "message": message, "request_id": REQUEST_ID.get()}, headers={"Cache-Control": "no-store"})
 
 
@@ -184,6 +195,81 @@ def create_preview_router(settings: Settings) -> APIRouter:
                 # Never reflect provider data, input rosters or exception text.
                 event("generation_failed", level=logging.ERROR, exception_type=type(exc).__name__, frames=safe_frames(exc))
                 raise failure(500, "GENERATION_FAILED", "The preview could not be verified or generated. No bookings were saved.") from exc
+            finally:
+                slots.release()
+
+    @router.post(
+        "/api/schedules/save", status_code=201, response_model=SaveResult,
+        responses={code: {"model": PreviewError} for code in (403, 404, 409, 429, 500, 502, 503, 504)},
+        summary="Save a reviewed preview as real class bookings (local development, admin use)",
+        description="Re-reads the week, rejects the save if anything changed since the preview, revalidates every class, "
+                    "then inserts all classes into class_sessions in one statement (all or nothing). Saved classes are "
+                    "visible immediately. There is no draft and no undo.",
+    )
+    async def save(body: SaveRequest, request: Request, response: Response):
+        response.headers["Cache-Control"] = "no-store"
+        try:
+            # Same slot as generation: a save never runs alongside a preview or another save.
+            slots.acquire_nowait()
+        except anyio.WouldBlock:
+            error = failure(429, "GENERATION_BUSY", "A preview or save is already running. Try again shortly.", "save_rejected")
+            error.headers["Retry-After"] = "2"
+            raise error
+        writing = False
+        with anyio.CancelScope(shield=True):
+            try:
+                event("save_started", placement_count=len(body.placements))
+                db = Supabase(settings.supabase, request.app.state.http_client)
+                snapshot = await load_scheduling_snapshot(db, settings.scheduling, body.week_start)
+                snapshot = select_scope(snapshot, body.intake_id, body.group_number)
+                rows = await anyio.to_thread.run_sync(prepare_rows, snapshot, body.snapshot_revision, body.placements)
+                event("save_validated", row_count=len(rows))
+                writing = True
+                saved = await db.insert("class_sessions", rows, "id,occurrence_id")
+                expected = {row["occurrence_id"] for row in rows}
+                if len(saved) != len(rows) or {str(row.get("occurrence_id")) for row in saved} != expected:
+                    raise failure(502, "SAVE_UNCONFIRMED", "Supabase did not confirm every saved class. Generate a new "
+                                  "preview to see what was saved before trying again.", "save_rejected")
+                event("save_completed", saved_count=len(saved))
+                return SaveResult(
+                    week_start=body.week_start.isoformat(), timezone=snapshot.timezone,
+                    scope="intake" if body.group_number is None else "intake_group",
+                    intake_id=body.intake_id, group_number=body.group_number, snapshot_revision=body.snapshot_revision,
+                    saved_count=len(saved),
+                    saved=[SavedClass(occurrence_id=row["occurrence_id"], class_session_id=row["id"]) for row in saved],
+                )
+            except SaveRejected as exc:
+                raise failure(exc.status, exc.code, exc.message, "save_rejected") from exc
+            except SchedulingDataError as exc:
+                raise failure(502, exc.code, exc.detail, "save_rejected") from exc
+            except SupabaseWriteError as exc:
+                event("save_write_failed", level=logging.WARNING, provider_status=exc.provider_status,
+                      provider_code=exc.provider_code)
+                if exc.provider_code == "23505" or exc.provider_status == 409:
+                    raise failure(409, "ALREADY_SAVED", "One or more of these classes were booked after the preview was "
+                                  "checked. Nothing was saved. Generate a new preview.", "save_rejected") from exc
+                if exc.provider_code == "42501" or exc.provider_status in (401, 403):
+                    raise failure(502, "DATABASE_PERMISSION_DENIED", "The server's database key cannot write class "
+                                  "bookings. Nothing was saved.", "save_rejected") from exc
+                if exc.provider_code in ("23503", "23514", "P0001") or exc.provider_status == 400:
+                    raise failure(409, "SAVE_REJECTED_BY_DATABASE", "The database rejected this timetable, so nothing "
+                                  "was saved. Generate a new preview; report the request ID if this repeats.",
+                                  "save_rejected") from exc
+                raise failure(502, "DATABASE_UNAVAILABLE", "The database could not save the timetable. Nothing was "
+                              "saved.", "save_rejected") from exc
+            except HTTPException as exc:
+                if isinstance(exc.detail, dict):
+                    raise
+                if writing and exc.status_code == 504:
+                    raise failure(504, "SAVE_OUTCOME_UNKNOWN", "Supabase timed out while saving. The classes may or may "
+                                  "not have been saved; generate a new preview to check before saving again.",
+                                  "save_rejected") from exc
+                code = {503: "DATABASE_NOT_CONFIGURED", 504: "DATABASE_TIMEOUT"}.get(exc.status_code, "DATABASE_UNAVAILABLE")
+                raise failure(exc.status_code, code, str(exc.detail), "save_rejected") from exc
+            except Exception as exc:
+                event("save_failed", level=logging.ERROR, exception_type=type(exc).__name__, frames=safe_frames(exc))
+                raise failure(500, "SAVE_FAILED", "The timetable could not be saved because of an internal error. "
+                              "Generate a new preview to check whether anything was saved.", "save_rejected") from exc
             finally:
                 slots.release()
 

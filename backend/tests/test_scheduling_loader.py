@@ -49,9 +49,52 @@ def provider(sql_payload, monkeypatch):
     settings = load_settings()
     settings.supabase.url_env = "SNAPSHOT_TEST_URL"
     settings.supabase.key_env = "SNAPSHOT_TEST_KEY"
-    state = {"payload": copy.deepcopy(sql_payload), "calls": [], "status": 200, "body": None, "delay": 0}
+    state = {"payload": copy.deepcopy(sql_payload), "calls": [], "status": 200, "body": None, "delay": 0,
+             # Step 10 writes are recorded separately so read-only assertions on "calls" are unchanged.
+             "writes": [], "write_status": None, "write_body": None, "write_delay": 0}
 
     class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            """Minimal stand-in for a PostgREST bulk insert into class_sessions."""
+            parsed = urlsplit(self.path)
+            rows = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"null")
+            state["writes"].append({"path": parsed.path, "rows": rows, "headers": dict(self.headers),
+                                    "parameters": {key: value[0] for key, value in parse_qs(parsed.query).items()}})
+            sleep(state["write_delay"])
+            status, body = state["write_status"], state["write_body"]
+            payload = state["payload"]
+            if status is None:
+                booked = {row.get("occurrence_id") for row in payload["class_bookings"]}
+                if parsed.path != "/rest/v1/class_sessions":
+                    status, body = 404, b"{}"
+                elif any(row["occurrence_id"] in booked for row in rows):
+                    status, body = 409, json.dumps({"code": "23505", "message": "duplicate key"}).encode()
+                else:
+                    created = []
+                    for row in rows:
+                        lesson = next(item for item in payload["requirements"] if item["occurrence_id"] == row["occurrence_id"])
+                        session_id = uid(9000 + len(payload["class_bookings"]))
+                        starts = datetime.fromisoformat(row["starts_at"])
+                        payload["class_bookings"].append({
+                            "id": session_id, "status": "scheduled", "room_id": row["room_id"],
+                            "starts_at": starts.isoformat(),
+                            "ends_at": (starts + timedelta(minutes=lesson["duration_minutes"])).isoformat(),
+                            "intake_id": lesson["intake_id"], "section_id": row["section_id"],
+                            "lecturer_id": lesson["lecturer_id"], "group_number": lesson["group_number"],
+                            "occurrence_id": row["occurrence_id"], "duration_minutes": lesson["duration_minutes"],
+                        })
+                        lesson.update(class_session_id=session_id, booking_status="scheduled", needs_scheduling=False,
+                                      starts_at=starts.isoformat(), room_id=row["room_id"])
+                        created.append({"id": session_id, "occurrence_id": row["occurrence_id"]})
+                    status, body = 201, json.dumps(created).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                pass
+
         def do_GET(self):
             parsed = urlsplit(self.path)
             params = {key: value[0] for key, value in parse_qs(parsed.query).items()}

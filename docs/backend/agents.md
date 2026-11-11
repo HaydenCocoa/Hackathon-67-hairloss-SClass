@@ -38,7 +38,7 @@ Step 1 now adds validated scheduling settings, a reusable calendar helper, and i
 
 Step 2 adds database-defined weekly teaching plans, automatic expansion into stable occurrences, optional booking links, cancellation/move integrity, and an internal paginated weekly-demand reader. It works with or without `class_sections.required_room_type`. The user confirmed Step 2 complete on 11 November 2026. The original design was verified locally on 10 November; this record holds no automated test results for the 11 November compatibility edit. See [implemented weekly teaching plans](weekly-teaching-plans.md) for setup, interfaces, decisions, and limits.
 
-Steps 4-7 add the validated weekly snapshot, shared booking validator, unrestricted candidate ranges, and complete CP-SAT feasibility generation with post-solve verification. Step 8 quality optimization is postponed. Step 9 exposes read-only generation through a local-development HTTP API and a service-hosted test page; these are verified locally. Authentication and transactional booking commits remain future work.
+Steps 4-7 add the validated weekly snapshot, shared booking validator, unrestricted candidate ranges, and complete CP-SAT feasibility generation with post-solve verification. Step 8 quality optimization is postponed. Step 9 exposes read-only generation through a local-development HTTP API and a service-hosted test page; these are verified locally. Step 10 adds saving a reviewed preview to `class_sessions` through the same local-development API and page (see [timetable saving](timetable-saving.md)). Authentication, save auditing and a database-transactional commit remain future work.
 
 The step 4 loader was changed on 11 November at the user's direction: the backend now reads existing Supabase tables/views and assembles its own scheduling input. It no longer invokes the optional historical snapshot RPC migration. Verification of these direct reads is pending; see [the updated loader record](scheduling-data-loader.md). The separate PostgREST requests are not one transaction snapshot, so any later booking write must revalidate transactionally.
 
@@ -57,7 +57,7 @@ No database schema or hosted data was changed for step 1. No frontend change was
 | 7 | CP-SAT generation satisfying all mandatory constraints and reporting accurate solver status | Complete and verified locally; no new migration |
 | 8 | Configurable objectives for student gaps, lecturer gaps, and room utilization | Postponed by the user; future enhancement |
 | 9 | Selected-intake/group preview API and test page including assignments, diagnostics, and scope-bound input revision; quality deferred | Complete and verified locally; direct localhost/development access only |
-| 10 | Authorized, transactional commits with revalidation, concurrency control, audit, and retry protection | Planned |
+| 10 | Authorized, transactional commits with revalidation, concurrency control, audit, and retry protection | Save implemented and verified locally on 11 Nov (local-development admin only; recheck-then-single-insert). Login-based authorization and audit deferred until the login page exists. Not run against hosted Supabase |
 | 11 | Safe rescheduling, cancellation, and fixed future reservations | Planned |
 | 12 | Verified requirements-to-generation-to-commit-to-retrieval workflow and acceptance scenarios | Planned |
 
@@ -81,7 +81,7 @@ No database schema or hosted data was changed for step 1. No frontend change was
 - No holiday dates have been supplied; `closed_dates` is empty and does not automatically import public holidays.
 - Initial opening windows are same-day only; overnight opening is not implemented.
 - Full availability, timetable generation, booking persistence, permissions, and concurrency protection are not completed by the calendar milestone.
-- Step 7 uses integer microseconds without preset teaching slots. Quality optimization is postponed. Local preview generation is implemented; trusted saving and revalidation remain step 10.
+- Step 7 uses integer microseconds without preset teaching slots. Quality optimization is postponed. Local preview generation and saving are implemented; login-based authorization, save auditing and a database-transactional commit remain open (step 10 follow-ups).
 
 ## Step 2 discussion — 10 November 2026
 
@@ -269,3 +269,21 @@ Historical discussion; superseded by the implementation record below after the u
 - Completion rests on the user's confirmation. This documentation-only task did not run the backend or database suites, query the hosted project, or apply any SQL. The user chose not to run the test suite in this session. The latest automated Step 2 results (16 focused reader, 59 full backend, 201 database checks) still predate the 11 November compatibility edit.
 - Deferred items are follow-ups, not blockers for Step 2: offering end dates, automatic holiday/semester-break handling, applying `202611100002_remove_required_room_type.sql` to the hosted database, adapting the legacy course seed and fresh setup, and updating the ERD.
 - Step 4's direct-read loader and the Step 9 preview that depends on it still need verification.
+
+## Step 10 saving plan and no-draft decision — 11 November 2026
+
+- The user decided there is **no draft storage** in this phase. A preview exists only on the page; leaving or reloading loses it and the admin generates again. Saving writes real bookings immediately. Reason: hackathon scope and shipping quickly.
+- Saved placements go into the existing `class_sessions` table (one row per placement: occurrence, section, room, start, `scheduled`). Other users see them through `class_session_details` under existing row-level security; the student timetable endpoint already reads it. No new table is needed.
+- Drafted a saving plan with seven open decisions (who may save, stale-preview handling, concurrency strength, audit, whole vs partial save, viewing, undo). It was planning only; the decisions and implementation are recorded in the next entry, and the plan file became [timetable saving](timetable-saving.md).
+
+## Step 10 implementation — 11 November 2026
+
+- Work done on a new branch `backend-step10-save-timetable`, created from an up-to-date `main` at the user's request. The user limited scope to the backend and the `development/` test page; no student, lecturer or admin frontend code was touched.
+- **Decisions confirmed by the user:** admin only (enforced by the existing development/localhost checks until login exists); reject a stale preview and regenerate; backend recheck then one insert, accepting the race with outside writers instead of a database function; audit deferred until the login page exists; whole preview only; viewing saved timetables out of scope; no undo, with a double confirmation on saving recorded as a design remark for the admin frontend.
+- Added `POST /api/schedules/save` (`backend/app/scheduling/save.py`, `preview.py`). It shares the generation slot and access checks, re-reads the week, requires the same scope-bound revision, requires every pending class exactly once, revalidates each class and their mutual clashes with the existing validator and solver verification, then writes all rows to `class_sessions` in one PostgREST insert. Section, lecturer, duration and roster come from the database, not the client. Errors are classified without provider text; write timeouts are reported as an unknown outcome.
+- Added `Supabase.insert` and `SupabaseWriteError` to the shared client in `backend/app/student.py`; made the solver's placement verification public (`verify_placements`, old private name kept as an alias); extended request tracing to the save path.
+- Development page: a save panel shown only for a complete preview, with a two-step confirmation (summary, then a required acknowledgement tick box). Notice text now says previews are not stored and saves cannot be undone.
+- Tests: extended the shared fake Supabase in `test_scheduling_loader.py` with a `class_sessions` insert (separate `writes` record, so existing read assertions are unchanged); added `test_schedule_save.py`; added save-flow page tests; gave the synthetic QA server (`serve_schedule_preview.py`) a minimal insert handler.
+- **Verification:** 30 new save API tests passed. 19 page tests passed (Node/jsdom), including a served-page save through the real backend against the synthetic QA service on port 8001, which was stopped afterwards. Full backend suite: **170 passed, 10 failed, 95 errors, 1 skipped**, compared with **140 passed** and the **same** 10 failures and 95 errors on `main` before this work. Those pre-existing problems are stale fixtures (removed `required_room_type` field; pre-direct-read RPC expectations) and were not changed here.
+- Not verified: a save against hosted Supabase, visual browser rendering, multiple server processes. No hosted data, schema, migration or grant was changed.
+- Observed but not changed (out of scope): `backend/app/lecturer.py`'s reschedule endpoint writes `class_sessions` directly without validation or the scheduling slot. The scheduling API quick guide (`scheduling-api-guide.md`) is on the unmerged `backend-development-hayden` branch, not on `main`, so it was not updated here.

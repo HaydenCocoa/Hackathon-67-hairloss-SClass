@@ -39,5 +39,14 @@ summary { cursor: pointer; font-weight: 600; }
 pre { overflow: auto; max-height: 420px; font-size: 12px; line-height: 1.6; background: #f5f8fa; padding: 16px; }
 footer { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; color: #536777; font-size: 13px; padding-top: 12px; }
 a { color: #146652; }
+.confirm { margin-top: 18px; padding: 18px 20px; border: 1px solid #e3b4b8; border-radius: 10px; background: #fdf4f5; }
+.confirm p { margin: 0 0 10px; }
+.check { display: flex; gap: 10px; align-items: flex-start; font-weight: 500; line-height: 1.5; }
+.check input { min-height: 0; margin-top: 4px; width: auto; }
+.actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 14px; }
+button.danger { background: #a3323b; border-color: #a3323b; }
+button.danger:hover { background: #85272f; }
+button.secondary { background: white; color: #183042; border-color: #adbdc8; }
+button.secondary:hover { background: #f1f5f7; }
 [hidden] { display: none !important; }
 @media (max-width: 600px) { main { padding: 24px 14px; } .panel { padding: 18px; } form > div, input, button { width: 100%; } }
