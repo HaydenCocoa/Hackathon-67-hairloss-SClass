@@ -8,8 +8,15 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+from backend.app.auth import SessionUser, get_session
 from backend.app.config import load_settings
 from backend.app.main import create_app
+
+
+def logged_in(app):
+    """Database health needs a login; act as a logged-in student."""
+    app.dependency_overrides[get_session] = lambda: SessionUser(role="student", name="T", profile_id="s", code="S1", home="/student")
+    return app
 
 
 @pytest.fixture
@@ -59,12 +66,14 @@ def test_boot_config_and_health(settings, tmp_path):
         assert client.get("/Config/preference.json").status_code == 404
         assert client.get("/.env").status_code == 404
         assert client.get("/api/missing").status_code == 404
-        assert client.get("/").status_code == 503
+        assert client.get("/", follow_redirects=False).headers["location"] == "/login"
+        assert client.get("/login").status_code == 503  # no frontend build in tmp_path
+        assert client.get("/api/health/database").status_code == 401  # login required
         assert "/api/health/database" in client.get("/openapi.json").json()["paths"]
 
 
 def test_missing_credentials_does_not_block_boot(settings):
-    with TestClient(create_app(settings)) as client:
+    with TestClient(logged_in(create_app(settings))) as client:
         response = client.get("/api/health/database")
         assert response.status_code == 503
         assert response.json()["status"] == "not_configured"
@@ -86,7 +95,7 @@ def test_query_uses_real_http_and_keeps_rows_private(settings, upstream, monkeyp
     state["body"] = b'[{"id":"private-room-id"}]'
     monkeypatch.setenv("TEST_SUPABASE_URL", url)
     monkeypatch.setenv("TEST_SUPABASE_KEY", key)
-    with TestClient(create_app(settings)) as client:
+    with TestClient(logged_in(create_app(settings))) as client:
         response = client.get("/api/health/database")
         assert response.status_code == 200
         assert response.json()["status"] == "connected"
@@ -110,7 +119,7 @@ def test_failed_queries_do_not_report_success(settings, upstream, monkeypatch, s
     state.update(status=status, body=body)
     monkeypatch.setenv("TEST_SUPABASE_URL", url)
     monkeypatch.setenv("TEST_SUPABASE_KEY", "sb_secret_test-only")
-    with TestClient(create_app(settings)) as client:
+    with TestClient(logged_in(create_app(settings))) as client:
         response = client.get("/api/health/database")
         assert response.status_code == 503
         assert response.json()["status"] == "error"
@@ -124,7 +133,7 @@ def test_timeout(settings, upstream, monkeypatch):
     settings.supabase.timeout_seconds = 0.05
     monkeypatch.setenv("TEST_SUPABASE_URL", url)
     monkeypatch.setenv("TEST_SUPABASE_KEY", "test-key")
-    with TestClient(create_app(settings)) as client:
+    with TestClient(logged_in(create_app(settings))) as client:
         response = client.get("/api/health/database")
         assert response.status_code == 503
         assert response.json()["status"] == "timeout"
@@ -133,7 +142,7 @@ def test_timeout(settings, upstream, monkeypatch):
 def test_disallowed_http_url(settings, monkeypatch):
     monkeypatch.setenv("TEST_SUPABASE_URL", "http://example.com")
     monkeypatch.setenv("TEST_SUPABASE_KEY", "test-key")
-    with TestClient(create_app(settings)) as client:
+    with TestClient(logged_in(create_app(settings))) as client:
         assert client.get("/api/health/database").json()["status"] == "error"
 
 
@@ -150,7 +159,8 @@ def test_built_frontend_is_served_without_exposing_other_files(settings, tmp_pat
     assets.mkdir()
     (assets / "app.js").write_text('console.log("SClass")')
     with TestClient(create_app(settings, tmp_path)) as client:
-        assert client.get("/").status_code == 200
+        assert client.get("/login").status_code == 200
+        assert client.get("/student", follow_redirects=False).headers["location"] == "/login?next=/student"
         assert client.get("/assets/app.js").status_code == 200
         assert client.get("/api/health").json()["status"] == "ok"
         assert client.get("/Config/config.json").status_code == 404
@@ -159,7 +169,7 @@ def test_built_frontend_is_served_without_exposing_other_files(settings, tmp_pat
 @pytest.mark.skipif(not os.getenv("SUPABASE_SIMULATION_URL"), reason="Optional Postman simulation is not running")
 def test_postman_simulation(settings, monkeypatch):
     monkeypatch.setenv("TEST_SUPABASE_URL", os.environ["SUPABASE_SIMULATION_URL"])
-    with TestClient(create_app(settings)) as client:
+    with TestClient(logged_in(create_app(settings))) as client:
         for key, expected in [("sb_secret_simulation", "connected"), ("invalid-key", "error")]:
             monkeypatch.setenv("TEST_SUPABASE_KEY", key)
             response = client.get("/api/health/database")

@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from backend.app.main import create_app
 from backend.app.scheduling import preview
-from backend.tests.test_schedule_preview import BASE, WEEK, client_for, traces  # noqa: F401 (fixture)
+from backend.tests.test_schedule_preview import BASE, WEEK, as_admin, client_for, traces  # noqa: F401 (fixture)
 from backend.tests.test_scheduling_loader import provider, sql_payload, uid  # noqa: F401 (fixtures)
 
 SAVE = "/api/schedules/save"
@@ -215,7 +215,7 @@ def test_save_access_rules_match_preview(provider, case):
         headers = {"Origin": "https://attacker.example"}
     else:
         headers = {"X-Forwarded-For": "127.0.0.1"}
-    with TestClient(create_app(settings), base_url=BASE, client=peer, headers=headers) as client:
+    with TestClient(as_admin(create_app(settings)), base_url=BASE, client=peer, headers=headers) as client:
         assert client.post(SAVE, json=body).status_code == (404 if case == "production" else 403)
     assert not state["calls"] and not state["writes"]
 

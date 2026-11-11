@@ -2,9 +2,10 @@ import os
 import httpx
 from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from .auth import SessionUser, require_login, require_roles
 from .config import SupabaseSettings
 
 # Classes are scheduled and shown in Malaysia time (UTC+8, no daylight saving).
@@ -63,27 +64,41 @@ class Supabase:
             print("Request Exception:", e)
             raise HTTPException(500, f"Failed to reach Supabase: {str(e)}")
 
+LECTURER_OR_ADMIN = require_roles("lecturer", "admin")
+
+
+def check_own_lecturer(session: SessionUser, lecturer_id: str) -> None:
+    # Login: a lecturer may only use their own id; admins may use any.
+    if session.role == "lecturer" and session.profile_id != lecturer_id:
+        raise HTTPException(403, {"message": "You can only view and change your own classes.", "conflicts": []})
+
+
 def create_lecturer_router(settings: SupabaseSettings) -> APIRouter:
     router = APIRouter(prefix="/api", tags=["lecturer"])
 
-    @router.get("/rooms", response_model=List[dict])
+    @router.get("/rooms", response_model=List[dict], dependencies=[Depends(require_login)])
     async def get_rooms(request: Request):
         db = Supabase(settings, request.app.state.http_client)
         return await db.get("rooms", [("select", "*"), ("is_active", "eq.true")])
 
     @router.get("/lecturers", response_model=List[dict])
-    async def get_lecturers(request: Request):
+    async def get_lecturers(request: Request, session: SessionUser = Depends(LECTURER_OR_ADMIN)):
         db = Supabase(settings, request.app.state.http_client)
-        rows = await db.get("lecturers", [("select", "id,full_name")])
+        params = [("select", "id,full_name")]
+        if session.role == "lecturer":
+            params.append(("id", f"eq.{session.profile_id}"))  # a lecturer only sees themselves
+        rows = await db.get("lecturers", params)
         return [{"id": r["id"], "name": r["full_name"]} for r in rows]
 
     @router.get("/lecturers/{lecturer_id}/timetable", response_model=List[SessionDetail])
     async def get_lecturer_timetable(
-        lecturer_id: str, 
+        lecturer_id: str,
         request: Request,
-        start: str = Query(...), 
-        end: Optional[str] = None
+        start: str = Query(...),
+        end: Optional[str] = None,
+        session: SessionUser = Depends(LECTURER_OR_ADMIN),
     ):
+        check_own_lecturer(session, lecturer_id)
         try:
             db = Supabase(settings, request.app.state.http_client)
             
@@ -148,9 +163,17 @@ def create_lecturer_router(settings: SupabaseSettings) -> APIRouter:
             raise HTTPException(500, detail=str(e))
 
     @router.patch("/lecturers/{lecturer_id}/sessions/{session_id}")
-    async def reschedule_session(lecturer_id: str, session_id: str, payload: RescheduleRequest, request: Request):
+    async def reschedule_session(lecturer_id: str, session_id: str, payload: RescheduleRequest, request: Request,
+                                 session: SessionUser = Depends(LECTURER_OR_ADMIN)):
+        check_own_lecturer(session, lecturer_id)
         db = Supabase(settings, request.app.state.http_client)
-        
+        # The class must belong to this lecturer; otherwise anyone could move any class.
+        owned = await db.get("class_session_details", [("select", "id,lecturer_id"), ("id", f"eq.{session_id}")])
+        if not owned:
+            raise HTTPException(404, {"message": "Class not found.", "conflicts": []})
+        if str(owned[0].get("lecturer_id")) != lecturer_id:
+            raise HTTPException(403, {"message": "You can only change your own classes.", "conflicts": []})
+
         new_starts_at = f"{payload.session_date}T{payload.start_time}:00+08:00"
         url = f"{db.url}/rest/v1/class_sessions?id=eq.{session_id}"
         data = {"starts_at": new_starts_at, "room_id": payload.room_id}

@@ -4,8 +4,8 @@ Reads Supabase through the Data API with the server-only key, so rows are
 filtered here by the student's intake/group memberships (the service key
 bypasses RLS).
 
-TODO (after login is ready): take the student from the signed-in session
-instead of the URL, so students can only open their own timetable.
+Login is required: a student may only open their own code (checked against the
+session); admins may open any student.
 """
 
 import os
@@ -14,10 +14,13 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from .auth import SessionUser, require_roles
 from .config import SupabaseSettings
+
+STUDENT_OR_ADMIN = require_roles("student", "admin")
 
 STUDENT_CODE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 MAX_RANGE = timedelta(days=31)
@@ -240,8 +243,14 @@ def to_change(row: dict, rooms: dict) -> Change:
 def create_student_router(settings: SupabaseSettings) -> APIRouter:
     router = APIRouter(prefix="/api/student", tags=["student"])
 
+    def check_owner(session: SessionUser, student_code: str) -> None:
+        # Students may only open their own record; admins may open any.
+        if session.role == "student" and (session.code or "").upper() != student_code.upper():
+            raise HTTPException(403, "You can only view your own timetable.")
+
     @router.get("/{student_code}", response_model=StudentProfile)
-    async def student_profile(student_code: str, request: Request):
+    async def student_profile(student_code: str, request: Request, session: SessionUser = Depends(STUDENT_OR_ADMIN)):
+        check_owner(session, student_code)
         db = Supabase(settings, request.app.state.http_client)
         return await load_student(db, student_code)
 
@@ -251,7 +260,9 @@ def create_student_router(settings: SupabaseSettings) -> APIRouter:
         request: Request,
         start: datetime = Query(description="Start of the range (ISO 8601), e.g. Monday 00:00 local time"),
         end: datetime = Query(description="End of the range (exclusive), at most 31 days after start"),
+        session: SessionUser = Depends(STUDENT_OR_ADMIN),
     ):
+        check_owner(session, student_code)
         start, end = (t if t.tzinfo else t.replace(tzinfo=timezone.utc) for t in (start, end))
         if end <= start or (end - start) > MAX_RANGE:
             raise HTTPException(422, "end must be after start and within 31 days.")

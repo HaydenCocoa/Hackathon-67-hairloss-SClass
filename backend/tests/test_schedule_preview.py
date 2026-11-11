@@ -8,11 +8,13 @@ from threading import Event
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.app.auth import SessionUser, get_session
 from backend.app.main import create_app
 from backend.app.scheduling import preview
 from backend.app.scheduling.solver import ScheduleVerificationError
 from backend.tests.test_scheduling_loader import provider, sql_payload, uid
 
+ADMIN = SessionUser(role="admin", name="Test Admin", profile_id="00000000-0000-0000-0000-0000000000ad", home="/admin")
 WEEK = {"week_start": "2026-11-09", "intake_id": uid(1)}
 BASE = "http://127.0.0.1:8000"
 
@@ -34,8 +36,14 @@ def traces():
         LOGGER.removeHandler(handler)
 
 
+def as_admin(app):
+    """Act as a logged-in administrator (login itself is covered by test_auth.py)."""
+    app.dependency_overrides[get_session] = lambda: ADMIN
+    return app
+
+
 def client_for(settings, **kwargs):
-    return TestClient(create_app(settings), base_url=BASE, client=("127.0.0.1", 51000), **kwargs)
+    return TestClient(as_admin(create_app(settings)), base_url=BASE, client=("127.0.0.1", 51000), **kwargs)
 
 
 def test_real_http_snapshot_to_solver_preview_is_complete_private_and_read_only(provider):
@@ -274,7 +282,7 @@ def test_access_rejected_before_database_for_page_assets_and_api(provider, case)
         headers = {"Origin": "https://attacker.example"}
     else:
         headers = {"X-Forwarded-For": "127.0.0.1"}
-    with TestClient(create_app(settings), base_url=BASE, client=peer, headers=headers) as client:
+    with TestClient(as_admin(create_app(settings)), base_url=BASE, client=peer, headers=headers) as client:
         expected = 404 if case == "production" else 403
         assert client.post("/api/schedules/generate", json=WEEK).status_code == expected
         for path in (preview.PAGE_PATH, preview.PAGE_PATH + "/app.js", preview.PAGE_PATH + "/style.css"):
@@ -307,7 +315,7 @@ def test_page_assets_openapi_and_cors_are_available_without_frontend_build(provi
 @pytest.mark.parametrize("host", ["localhost", "[::1]"])
 def test_loopback_hostname_and_ipv6_access(provider, host):
     settings, _ = provider
-    with TestClient(create_app(settings), base_url=f"http://{host}:8000", client=("::1", 51000)) as client:
+    with TestClient(as_admin(create_app(settings)), base_url=f"http://{host}:8000", client=("::1", 51000)) as client:
         assert client.get(preview.PAGE_PATH).status_code == 200
 
 

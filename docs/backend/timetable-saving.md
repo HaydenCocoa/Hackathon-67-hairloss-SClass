@@ -87,7 +87,7 @@ Provider messages, details and hints are never returned or logged; only the HTTP
 
 ## Development page
 
-At `/development/scheduling-test-hayden`, a **Save timetable** panel appears only for a complete preview (`has_solution`).
+At `/admin/development/scheduling-test-hayden` (admin login required since 12 November 2026), a **Save timetable** panel appears only for a complete preview (`has_solution`).
 
 1. **Save timetable…** opens a confirmation showing the class count, intake, group and week, and that the save is immediate and cannot be undone.
 2. **Confirm save** stays disabled until the acknowledgement box is ticked. **Cancel** closes it without saving.
