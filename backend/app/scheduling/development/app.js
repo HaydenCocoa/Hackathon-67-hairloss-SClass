@@ -2,6 +2,8 @@
 
 const form = document.querySelector("#generate-form");
 const weekInput = document.querySelector("#week-start");
+const intakeInput = document.querySelector("#intake-id");
+const groupInput = document.querySelector("#group-number");
 const button = document.querySelector("#generate");
 const statusBox = document.querySelector("#status");
 const resultBox = document.querySelector("#result");
@@ -23,7 +25,7 @@ function cell(row, primary, secondary) {
   row.append(td);
 }
 
-function render(data) {
+function render(data, requestId = "") {
   const summary = document.querySelector("#summary");
   summary.replaceChildren();
   const metrics = [["Solver outcome", data.status], ["Proposed / required", `${data.placements.length} / ${data.required_count}`],
@@ -57,11 +59,11 @@ function render(data) {
     cell(row, item.student_count);
     body.append(row);
   }
-  document.querySelector("#schedule-caption").textContent = `Week of ${data.week_start} · ${data.timezone}`;
+  document.querySelector("#schedule-caption").textContent = `Week of ${data.week_start} · ${data.timezone} · Intake ${data.intake_id} · ${data.group_number === null ? "All groups" : `Group ${data.group_number}`}`;
   document.querySelector("#schedule").hidden = !data.placements.length;
   const empty = document.querySelector("#empty");
   empty.hidden = !!data.placements.length;
-  empty.textContent = data.status === "NO_PENDING_REQUIREMENTS" ? "There are no pending classes to schedule for this week." : "No complete timetable was generated. See the diagnostics below.";
+  empty.textContent = data.status === "NO_PENDING_REQUIREMENTS" ? "There are no pending classes for this intake/group in the selected week." : "No complete timetable was generated. See the diagnostics below.";
   const diagnostics = document.querySelector("#diagnostics");
   diagnostics.replaceChildren();
   const messages = data.diagnostics.map(item => `${item.code}: ${item.detail}`);
@@ -79,49 +81,73 @@ function render(data) {
   resultBox.hidden = false;
   const message = data.has_solution ? "Complete preview generated. Review the proposed classes below; nothing has been saved."
     : data.status === "UNKNOWN" ? "Search finished without a complete result. This does not prove the week is impossible."
-    : data.status === "NO_PENDING_REQUIREMENTS" ? "No pending classes for this week."
+    : data.status === "NO_PENDING_REQUIREMENTS" ? "No pending classes for this intake/group in the selected week."
     : "No complete timetable satisfies the current constraints. See diagnostics below.";
-  status(message, data.has_solution ? "success" : data.status === "NO_PENDING_REQUIREMENTS" ? "" : "error");
+  status(message + (requestId ? ` Request ID: ${requestId}` : ""), data.has_solution ? "success" : data.status === "NO_PENDING_REQUIREMENTS" ? "" : "error");
 }
 
 form.addEventListener("submit", async event => {
   event.preventDefault();
   const value = weekInput.value;
+  const intakeId = intakeInput.value.trim();
+  const group = groupInput.value.trim() === "" ? null : Number(groupInput.value);
   weekInput.setCustomValidity("");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || new Date(`${value}T00:00:00Z`).getUTCDay() !== 1) {
     weekInput.setCustomValidity("Choose a Monday for the start of the teaching week.");
     weekInput.reportValidity();
     return;
   }
+  intakeInput.setCustomValidity("");
+  groupInput.setCustomValidity("");
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(intakeId)) {
+    intakeInput.setCustomValidity("Enter the intake's UUID from the database.");
+    intakeInput.reportValidity();
+    return;
+  }
+  if (group !== null && (!Number.isSafeInteger(group) || group < 1)) {
+    groupInput.setCustomValidity("Group must be a positive whole number.");
+    groupInput.reportValidity();
+    return;
+  }
   resultBox.hidden = true;
   button.disabled = true;
   weekInput.disabled = true;
+  intakeInput.disabled = true;
+  groupInput.disabled = true;
   button.textContent = "Generating…";
   status("Loading database inputs and generating a complete preview. This may take a little longer than the configured solver search limit.");
+  let requestId = "";
   try {
     const response = await fetch("/api/schedules/generate", {
       method: "POST", headers: { "Content-Type": "application/json", "Accept": "application/json" },
-      body: JSON.stringify({ week_start: value }), cache: "no-store",
+      body: JSON.stringify({ week_start: value, intake_id: intakeId, group_number: group }), cache: "no-store",
     });
+    requestId = response.headers?.get("X-Request-ID") || "";
     let data;
     try { data = await response.json(); } catch { throw new Error(`The server returned an unreadable response (HTTP ${response.status}).`); }
     if (!response.ok) {
       const detail = data.detail;
+      requestId = requestId || detail?.request_id || "";
       const message = Array.isArray(detail) ? detail.map(item => item.msg).join("; ")
         : typeof detail === "string" ? detail : detail?.message || "The request could not be completed.";
-      throw new Error(`HTTP ${response.status}: ${message}`);
+      throw new Error(`HTTP ${response.status}${detail?.code ? ` [${detail.code}]` : ""}: ${message}`);
     }
-    render(data);
+    render(data, requestId);
   } catch (error) {
     resultBox.hidden = true;
-    status(error instanceof Error ? error.message : "Could not reach the API server. Try again.", "error");
+    const message = error instanceof Error ? error.message : "Could not reach the API server. Try again.";
+    status(message + (requestId ? ` Request ID: ${requestId}` : ""), "error");
   } finally {
     button.disabled = false;
     weekInput.disabled = false;
+    intakeInput.disabled = false;
+    groupInput.disabled = false;
     button.textContent = "Generate preview";
   }
 });
 weekInput.addEventListener("input", () => weekInput.setCustomValidity(""));
+intakeInput.addEventListener("input", () => intakeInput.setCustomValidity(""));
+groupInput.addEventListener("input", () => groupInput.setCustomValidity(""));
 
 // Pick the current campus week for convenience; the user can choose any Monday.
 const local = new Intl.DateTimeFormat("en-CA", { timeZone: document.documentElement.dataset.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());

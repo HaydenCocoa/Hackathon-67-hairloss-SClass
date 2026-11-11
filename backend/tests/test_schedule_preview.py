@@ -1,4 +1,7 @@
 import copy
+import json
+import logging
+import re
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 
@@ -8,10 +11,27 @@ from fastapi.testclient import TestClient
 from backend.app.main import create_app
 from backend.app.scheduling import preview
 from backend.app.scheduling.solver import ScheduleVerificationError
-from backend.tests.test_scheduling_loader import provider, sql_payload
+from backend.tests.test_scheduling_loader import provider, sql_payload, uid
 
-WEEK = {"week_start": "2026-11-09"}
+WEEK = {"week_start": "2026-11-09", "intake_id": uid(1)}
 BASE = "http://127.0.0.1:8000"
+
+
+@pytest.fixture
+def traces():
+    from backend.app.observability import LOGGER
+    records = []
+
+    class Capture(logging.Handler):
+        def emit(self, record):
+            records.append(record.trace_fields)
+
+    handler = Capture()
+    LOGGER.addHandler(handler)
+    try:
+        yield records
+    finally:
+        LOGGER.removeHandler(handler)
 
 
 def client_for(settings, **kwargs):
@@ -26,7 +46,8 @@ def test_real_http_snapshot_to_solver_preview_is_complete_private_and_read_only(
         assert response.status_code == 200, response.text
         data = response.json()
         assert data["has_solution"] and data["status"] in ("OPTIMAL", "FEASIBLE")
-        assert data["scope"] == "week"
+        assert data["scope"] == "intake"
+        assert data["intake_id"] == uid(1) and data["group_number"] is None
         assert len(data["placements"]) == data["required_count"] == 1
         assert data["quality_optimized"] is False and data["quality"] is None
         assert len(data["snapshot_revision"]) == 64
@@ -53,12 +74,76 @@ def test_real_http_snapshot_to_solver_preview_is_complete_private_and_read_only(
     {"week_start": "2026-11-09T00:00:00Z"}, {"week_start": 1794182400},
     {"week_start": None}, {"week_start": "9999-12-27"},
     {**WEEK, "student_ids": []}, {**WEEK, "max_time_seconds": 5000},
+    {**WEEK, "intake_id": "not-a-uuid"}, {**WEEK, "group_number": 0},
+    {**WEEK, "group_number": -1}, {**WEEK, "group_number": 1.5},
+    {**WEEK, "group_number": True}, {**WEEK, "group_number": "1"},
 ])
 def test_invalid_request_does_not_load_database(provider, body):
     settings, state = provider
+    body = {"intake_id": uid(1), **body} if body else body
     with client_for(settings) as client:
         assert client.post("/api/schedules/generate", json=body).status_code == 422
     assert not state["calls"]
+
+
+def test_intake_is_required_and_group_filter_does_not_expand_scope(provider):
+    settings, state = provider
+    with client_for(settings) as client:
+        assert client.post("/api/schedules/generate", json={"week_start": WEEK["week_start"]}).status_code == 422
+        assert not state["calls"]
+        for selection in ({**WEEK, "group_number": 2}, {**WEEK, "intake_id": uid(2)}):
+            response = client.post("/api/schedules/generate", json=selection)
+            assert response.status_code == 200
+            assert response.json()["status"] == "NO_PENDING_REQUIREMENTS"
+            assert response.json()["placements"] == []
+
+
+def test_selected_group_excludes_other_pending_demand_but_all_intake_groups_are_joint(provider):
+    settings, state = provider
+    source = next(row for row in state["payload"]["requirements"] if row["needs_scheduling"])
+    # Group 2 of this intake and another intake have impossible pending demand.
+    # Selecting group 1 must not attempt to place either unrelated occurrence.
+    for number, intake_id, group in [(600, uid(1), 2), (700, uid(3), 1)]:
+        lesson = {**source, "occurrence_id": uid(number), "section_id": uid(number + 1),
+                  "plan_id": uid(number + 2), "intake_id": intake_id, "group_number": group, "duration_minutes": 6000}
+        state["payload"]["requirements"].append(lesson)
+        state["payload"]["rosters"].append({"section_id": lesson["section_id"], "intake_id": intake_id,
+                                             "group_number": group, "student_ids": [uid(10)]})
+    with client_for(settings) as client:
+        selected = client.post("/api/schedules/generate", json={**WEEK, "group_number": 1}).json()
+        assert selected["has_solution"] and selected["required_count"] == 1
+        assert selected["scope"] == "intake_group" and selected["group_number"] == 1
+        assert all(p["intake_id"] == uid(1) and p["group_number"] == 1 for p in selected["placements"])
+        all_groups = client.post("/api/schedules/generate", json=WEEK).json()
+        assert all_groups["status"] == "INFEASIBLE" and all_groups["required_count"] == 2
+        other = client.post("/api/schedules/generate", json={**WEEK, "intake_id": uid(3)}).json()
+        assert other["status"] == "INFEASIBLE" and other["required_count"] == 1
+        assert len({selected["snapshot_revision"], all_groups["snapshot_revision"], other["snapshot_revision"]}) == 3
+
+
+def test_scoped_projection_keeps_cross_intake_students_and_all_fixed_bookings(provider):
+    from datetime import datetime
+    from backend.tests.test_scheduling_loader import read
+    from backend.app.scheduling.candidates import generate_candidates
+    from backend.app.scheduling.validator import BookingProposal, validate_booking
+    from uuid import UUID
+
+    snapshot = read(provider)
+    selected = preview.select_scope(snapshot, UUID(uid(1)), 1)
+    assert selected.class_bookings is snapshot.class_bookings
+    assert selected.meeting_bookings is snapshot.meeting_bookings
+    assert selected.rooms is snapshot.rooms
+    assert selected.pending_requirements[0].student_ids == snapshot.pending_requirements[0].student_ids
+    assert all(item.intake_id == UUID(uid(1)) for item in selected.requirements)
+    assert any(item.intake_id != UUID(uid(1)) for item in selected.class_bookings)
+    lesson = selected.pending_requirements[0]
+    # Different lecturer and room, but a student attends both intakes.
+    blocked = datetime.fromisoformat("2026-11-09T14:43:00+08:00")
+    proposal = BookingProposal(occurrence_id=lesson.occurrence_id, room_id=UUID(uid(60)), starts_at=blocked)
+    assert "STUDENT_CONFLICT" in validate_booking(selected, proposal).reason_codes
+    assert not any(item.contains(blocked) for item in generate_candidates(selected, lesson.occurrence_id).ranges)
+    assert preview.select_scope(snapshot, UUID(uid(1)), 1).revision == selected.revision
+    assert preview.select_scope(snapshot, UUID(uid(1)), 2).revision != selected.revision
 
 
 def test_empty_week_and_infeasibility_are_explicit_non_partial_results(provider):
@@ -98,7 +183,7 @@ def test_provider_failure_is_safe_and_capacity_is_released(provider, status, bod
     with client_for(settings) as client:
         response = client.post("/api/schedules/generate", json=WEEK)
         assert response.status_code == 502
-        assert response.json()["detail"]["code"] == "DATABASE_UNAVAILABLE"
+        assert response.json()["detail"]["code"] == ("DATABASE_PERMISSION_DENIED" if status in (401, 403) else "DATABASE_UNAVAILABLE")
         assert "provider-error" not in response.text
         state.update(status=200, body=None)
         assert client.post("/api/schedules/generate", json=WEEK).status_code == 200
@@ -220,3 +305,70 @@ def test_loopback_hostname_and_ipv6_access(provider, host):
     settings, _ = provider
     with TestClient(create_app(settings), base_url=f"http://{host}:8000", client=("::1", 51000)) as client:
         assert client.get(preview.PAGE_PATH).status_code == 200
+
+
+@pytest.mark.parametrize("provider_code,expected", [
+    ("PGRST202", "SCHEDULING_RPC_NOT_FOUND"), ("42501", "DATABASE_PERMISSION_DENIED"),
+    ("42P01", "DATABASE_SCHEMA_INCOMPLETE"), ("UNTRUSTED-SECRET", "DATABASE_UNAVAILABLE"),
+    ({"unexpected": "SECRET"}, "DATABASE_UNAVAILABLE"),
+])
+def test_provider_error_is_classified_and_traced_without_private_bodies(provider, traces, provider_code, expected):
+    settings, state = provider
+    state.update(status=404, body=json.dumps({"code": provider_code, "message": "PRIVATE-STUDENT-PAYLOAD",
+                                             "details": "sb_secret_DO_NOT_LOG", "hint": "PRIVATE-STUDENT-PAYLOAD"}).encode())
+    with client_for(settings) as client:
+        response = client.post("/api/schedules/generate", json=WEEK, headers={"X-Request-ID": "injected-caller-value"})
+        assert response.status_code == 502
+        detail = response.json()["detail"]
+        assert detail["code"] == expected
+        trace_id = response.headers["x-request-id"]
+        assert re.fullmatch("[0-9a-f]{32}", trace_id)
+        assert detail["request_id"] == trace_id
+        records = [item for item in traces if item["request_id"] == trace_id]
+        failed = next(item for item in records if item["event"] == "rpc_failed")
+        assert failed["provider_status"] == 404
+        assert failed["rpc"] == "load_scheduling_data"
+        assert failed["provider_code"] == (provider_code if expected != "DATABASE_UNAVAILABLE" else None)
+        assert records[-1]["event"] == "request_completed" and records[-1]["http_status"] == 502
+        assert not any(item["event"] == "solver_started" for item in records)
+        if expected == "SCHEDULING_RPC_NOT_FOUND":
+            assert "202611100003_scheduling_snapshot.sql" in detail["message"]
+        output = response.text + json.dumps(records)
+        assert all(secret not in output for secret in ("PRIVATE-STUDENT-PAYLOAD", "sb_secret_DO_NOT_LOG", "injected-caller-value", "UNTRUSTED-SECRET"))
+
+
+def test_success_and_validation_errors_have_separate_request_ids(provider, traces):
+    settings, state = provider
+    with client_for(settings) as client:
+        success = client.post("/api/schedules/generate", json=WEEK)
+        invalid = client.post("/api/schedules/generate", json={})
+        denied = client.post("/api/schedules/generate", json=WEEK, headers={"Origin": "https://unapproved.example"})
+        assert (success.status_code, invalid.status_code, denied.status_code) == (200, 422, 403)
+        identifiers = [item.headers["x-request-id"] for item in (success, invalid, denied)]
+        assert len(set(identifiers)) == 3
+        selected = [item for item in traces if item["request_id"] == identifiers[0]]
+        assert {item["event"] for item in selected} >= {"request_started", "rpc_started", "rpc_completed", "snapshot_loaded", "solver_started", "solver_completed", "request_completed"}
+        assert next(item for item in selected if item["event"] == "solver_completed")["placement_count"] == 1
+        assert "X-Request-ID" in client.post("/api/schedules/generate", json={}, headers={"Origin": "http://localhost:5173"}).headers["access-control-expose-headers"]
+    assert len(state["calls"]) == 1
+    output = json.dumps(traces)
+    assert "student_ids" not in output and "intake_id" not in output and "sb_secret_snapshot_test" not in output
+
+
+def test_internal_failure_logs_stack_locations_without_messages_or_locals(provider, traces, monkeypatch):
+    settings, _ = provider
+
+    def failing_solver(*args):
+        private_student_record = "PRIVATE-STUDENT-RECORD"
+        raise RuntimeError(private_student_record)
+
+    monkeypatch.setattr(preview, "solve_weekly_schedule", failing_solver)
+    with client_for(settings) as client:
+        response = client.post("/api/schedules/generate", json=WEEK)
+        assert response.status_code == 500
+    failure = next(item for item in traces if item["event"] == "generation_failed")
+    assert failure["request_id"] == response.headers["x-request-id"]
+    assert failure["exception_type"] == "RuntimeError"
+    assert failure["frames"] and failure["frames"][-1]["function"] == "failing_solver"
+    assert all("/" not in frame["file"] and "\\" not in frame["file"] for frame in failure["frames"])
+    assert "PRIVATE-STUDENT-RECORD" not in response.text + json.dumps(traces)

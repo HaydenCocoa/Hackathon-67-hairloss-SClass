@@ -10,6 +10,8 @@ instead of the URL, so students can only open their own timetable.
 
 import os
 import re
+import logging
+from time import perf_counter
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -18,6 +20,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from .config import SupabaseSettings
+from .observability import event
 
 STUDENT_CODE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 MAX_RANGE = timedelta(days=31)
@@ -97,6 +100,26 @@ class Timetable(BaseModel):
 
 # ---------- Supabase helpers ----------
 
+class SupabaseRPCError(HTTPException):
+    """Only allowlisted provider codes are retained; raw bodies stay private."""
+
+    def __init__(self, provider_status: int, provider_code: str | None):
+        self.provider_status = provider_status
+        self.provider_code = provider_code
+        self.code = "DATABASE_UNAVAILABLE"
+        message = f"Supabase could not load scheduling data (HTTP {provider_status}). Check database migrations and server permissions."
+        if provider_code == "PGRST202":
+            self.code = "SCHEDULING_RPC_NOT_FOUND"
+            message = ("Supabase cannot find the matching public.load_scheduling_data(p_week_start, p_timezone) function in its schema cache. "
+                       "Check migration 202611100003_scheduling_snapshot.sql and reload the PostgREST schema cache.")
+        elif provider_status in (401, 403) or provider_code == "42501":
+            self.code = "DATABASE_PERMISSION_DENIED"
+            message = "Supabase denied scheduling access. Check the server-only key and scheduling function permissions."
+        elif provider_code in ("42P01", "42703", "42883"):
+            self.code = "DATABASE_SCHEMA_INCOMPLETE"
+            message = "The scheduling database schema is incomplete. Check the teaching-requirement and snapshot migrations."
+        super().__init__(502, message)
+
 class Supabase:
     def __init__(self, settings: SupabaseSettings, client: httpx.AsyncClient):
         self.url = os.getenv(settings.url_env, "").strip().rstrip("/")
@@ -132,23 +155,41 @@ class Supabase:
         """Call a trusted JSON-object RPC; no upstream details reach callers."""
         if not re.fullmatch(r"[a-z][a-z0-9_]*", function):
             raise ValueError("Invalid database function name")
+        started = perf_counter()
+        event("rpc_started", rpc=function, stage="load_snapshot")
         try:
             response = await self.client.post(
                 f"{self.url}/rest/v1/rpc/{function}", headers=self.headers,
                 json=parameters, timeout=self.timeout,
             )
         except httpx.TimeoutException:
+            event("rpc_failed", level=logging.WARNING, rpc=function, code="DATABASE_TIMEOUT",
+                  duration_ms=round((perf_counter() - started) * 1000, 2))
             raise HTTPException(504, "Supabase timed out. Try again.")
         except httpx.RequestError:
+            event("rpc_failed", level=logging.WARNING, rpc=function, code="DATABASE_UNAVAILABLE",
+                  duration_ms=round((perf_counter() - started) * 1000, 2))
             raise HTTPException(502, "Could not reach Supabase. Check the project URL and network.")
         if response.status_code != 200:
-            raise HTTPException(502, f"Supabase could not load scheduling data (HTTP {response.status_code}). Check database migrations and server permissions.")
+            try:
+                raw = response.json()
+            except ValueError:
+                raw = None
+            candidate = raw.get("code") if isinstance(raw, dict) else None
+            codes = {"PGRST202", "PGRST203", "PGRST106", "PGRST301", "PGRST302", "PGRST002", "42501", "42883", "42P01", "42703", "22023"}
+            provider_code = candidate if isinstance(candidate, str) and candidate in codes else None
+            error = SupabaseRPCError(response.status_code, provider_code)
+            event("rpc_failed", level=logging.WARNING, rpc=function, provider_status=response.status_code,
+                  provider_code=provider_code, code=error.code, duration_ms=round((perf_counter() - started) * 1000, 2))
+            raise error
         try:
             body = response.json()
         except ValueError:
             body = None
         if not isinstance(body, dict):
+            event("rpc_failed", level=logging.WARNING, rpc=function, provider_status=response.status_code, code="INVALID_RPC_RESPONSE")
             raise HTTPException(502, "Supabase returned an invalid scheduling snapshot.")
+        event("rpc_completed", rpc=function, provider_status=response.status_code, duration_ms=round((perf_counter() - started) * 1000, 2))
         return body
 
 

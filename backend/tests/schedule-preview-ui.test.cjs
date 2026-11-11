@@ -8,11 +8,13 @@ const { JSDOM } = require('jsdom');
 const assets = path.join(__dirname, '../app/scheduling/development');
 const html = fs.readFileSync(path.join(assets, 'index.html'), 'utf8').replace('__CAMPUS_TIMEZONE__', 'Asia/Kuala_Lumpur');
 const script = fs.readFileSync(path.join(assets, 'app.js'), 'utf8');
+const intakeId = '00000000-0000-0000-0000-000000000001';
 
 function result(status = 'OPTIMAL') {
   return {
     status, has_solution: ['OPTIMAL', 'FEASIBLE'].includes(status), week_start: '2026-11-09',
     timezone: 'Asia/Kuala_Lumpur', required_count: status === 'NO_PENDING_REQUIREMENTS' ? 0 : 1,
+    scope: 'intake', intake_id: intakeId, group_number: null,
     snapshot_revision: 'a'.repeat(64), quality_optimized: false, quality: null,
     statistics: { elapsed_seconds: 0.02 }, diagnostics: [], candidate_failures: [],
     placements: status === 'OPTIMAL' ? [{
@@ -29,6 +31,7 @@ function page(fetch) {
   dom.window.fetch = fetch;
   dom.window.eval(script);
   dom.window.document.querySelector('#week-start').value = '2026-11-09';
+  dom.window.document.querySelector('#intake-id').value = intakeId;
   return dom;
 }
 
@@ -55,7 +58,7 @@ test('page submits selected week, shows progress, and renders safe local-time pr
     submit(dom);
     assert.equal(request.url, '/api/schedules/generate');
     assert.equal(request.options.method, 'POST');
-    assert.deepEqual(JSON.parse(request.options.body), { week_start: '2026-11-09' });
+    assert.deepEqual(JSON.parse(request.options.body), { week_start: '2026-11-09', intake_id: intakeId, group_number: null });
     assert.equal(document.querySelector('button').disabled, true);
     assert.match(document.querySelector('#status').textContent, /Loading database inputs/);
     assert.equal(document.querySelector('#result').hidden, true);
@@ -90,6 +93,37 @@ test('non-Monday input is rejected before fetch and editing clears the error', (
   } finally { dom.window.close(); }
 });
 
+test('selected group is sent and invalid intake/group is rejected before fetch', async () => {
+  let calls = 0, request;
+  const dom = page(async (url, options) => {
+    calls++;
+    request = JSON.parse(options.body);
+    return { ok: true, json: async () => ({ ...result(), scope: 'intake_group', group_number: 2 }) };
+  });
+  try {
+    const document = dom.window.document;
+    const intake = document.querySelector('#intake-id');
+    const group = document.querySelector('#group-number');
+    intake.value = 'bad-id';
+    submit(dom);
+    assert.equal(calls, 0);
+    assert.equal(intake.validity.customError, true);
+    intake.value = intakeId;
+    intake.dispatchEvent(new dom.window.Event('input'));
+    group.value = '1.5';
+    submit(dom);
+    assert.equal(calls, 0);
+    group.value = '2';
+    group.dispatchEvent(new dom.window.Event('input'));
+    submit(dom);
+    await settled(dom);
+    assert.deepEqual(request, { week_start: '2026-11-09', intake_id: intakeId, group_number: 2 });
+    assert.match(document.querySelector('#schedule-caption').textContent, /Group 2/);
+    assert.equal(intake.disabled, false);
+    assert.equal(group.disabled, false);
+  } finally { dom.window.close(); }
+});
+
 for (const [status, message] of [
   ['NO_PENDING_REQUIREMENTS', /No pending classes/],
   ['UNKNOWN', /does not prove the week is impossible/],
@@ -112,7 +146,7 @@ for (const [status, message] of [
 }
 
 for (const [name, response, message] of [
-  ['busy', { ok: false, status: 429, json: async () => ({ detail: { code: 'GENERATION_BUSY', message: 'Another preview is being generated.' } }) }, /HTTP 429: Another preview/],
+  ['busy', { ok: false, status: 429, json: async () => ({ detail: { code: 'GENERATION_BUSY', message: 'Another preview is being generated.' } }) }, /HTTP 429 \[GENERATION_BUSY\]: Another preview/],
   ['validation', { ok: false, status: 422, json: async () => ({ detail: [{ msg: 'week_start must be a Monday' }] }) }, /must be a Monday/],
   ['invalid response', { ok: false, status: 502, json: async () => { throw new Error('invalid JSON'); } }, /unreadable response/],
 ]) {
@@ -144,6 +178,23 @@ test('network failure is shown and controls recover', async () => {
   } finally { dom.window.close(); }
 });
 
+test('provider error shows its classification and trace ID for log lookup', async () => {
+  const traceId = 'a'.repeat(32);
+  const dom = page(async () => ({
+    ok: false, status: 502, headers: { get: () => traceId },
+    json: async () => ({ detail: { code: 'SCHEDULING_RPC_NOT_FOUND', message: 'Check the snapshot migration and schema cache.', request_id: traceId } }),
+  }));
+  try {
+    submit(dom);
+    await settled(dom);
+    const status = dom.window.document.querySelector('#status').textContent;
+    assert.match(status, /SCHEDULING_RPC_NOT_FOUND/);
+    assert.match(status, /Check the snapshot migration/);
+    assert.ok(status.includes(`Request ID: ${traceId}`));
+    assert.equal(dom.window.document.querySelector('#result').hidden, true);
+  } finally { dom.window.close(); }
+});
+
 test('served page makes a real HTTP request and renders the real synthetic solver result', { skip: !process.env.SCHEDULING_UI_URL }, async () => {
   const url = process.env.SCHEDULING_UI_URL;
   const dom = await JSDOM.fromURL(url, {
@@ -156,7 +207,8 @@ test('served page makes a real HTTP request and renders the real synthetic solve
   });
   try {
     if (dom.window.document.readyState !== 'complete') await new Promise(resolve => dom.window.addEventListener('load', resolve, { once: true }));
-    dom.window.document.querySelector('input').value = '2026-11-09';
+    dom.window.document.querySelector('#week-start').value = '2026-11-09';
+    dom.window.document.querySelector('#intake-id').value = intakeId;
     submit(dom);
     await settled(dom);
     const document = dom.window.document;

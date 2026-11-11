@@ -51,6 +51,20 @@ assumptions:
     verification: On 2026-11-10, 29 focused API tests and 230 full backend tests passed with one optional simulation test skipped. Assertions cover the read-only RPC path, complete results, no private roster IDs, failures and timeouts, input validation, local-development access guards, configured solver options, and bounded concurrent generation with responsive health checks. Ten Node/jsdom page checks passed, including actual served HTML/JS calling the API against a synthetic provider and rendering a solved week and an empty week. Browser app access approval timed out, so visual/browser verification is not claimed. No hosted migration or scheduling request was performed.
     source: backend/tests/test_schedule_preview.py; backend/tests/schedule-preview-ui.test.cjs; backend/tests/serve_schedule_preview.py; docs/backend/schedule-preview-api.md
     updated_at: "2026-11-10"
+  - id: scheduling-preview-intake-group-scope
+    status: supported
+    claim: The preview route assigns only the selected intake and optional group while preserving all fixed bookings and cross-intake student conflict constraints from the validated weekly snapshot.
+    reason: The user confirmed selected-intake/group generation and local development without administrator authentication. Selection changes demand and its revision, not the availability blockers.
+    verification: On 2026-11-10, 38 focused API tests and 239 full backend tests passed with one optional simulation check skipped. Scope tests exclude other groups and intakes, retain shared-student fixed blockers, reject invalid scope fields, and verify distinct/stable scoped revisions. Eleven Node/jsdom page checks passed, including the real HTTP request/response path using synthetic PostgreSQL data. No hosted provider call, booking write, new SQL, or Postman CLI run was performed.
+    source: backend/app/scheduling/preview.py; backend/tests/test_schedule_preview.py; backend/tests/schedule-preview-ui.test.cjs; docs/backend/schedule-preview-api.md
+    updated_at: "2026-11-10"
+  - id: scheduling-rpc-tracing
+    status: supported
+    claim: Scheduling requests correlate safe console/file events and API/page errors while distinguishing provider schema-cache, permission, and incomplete-schema failures.
+    reason: The reported 502/404 needed provider-code classification and request-stage context without logging private provider bodies or scheduling input.
+    verification: On 2026-11-10, 47 focused logging/API tests, 248 full backend tests (one optional simulation skipped), and 12 Node/jsdom page checks passed. Error injection verifies request IDs, recognized provider codes, privacy, stage ordering, and file/console logging. Read-only requests to the configured provider confirmed 404/PGRST202 and reproduced a correlated SCHEDULING_RPC_NOT_FOUND response without returning a snapshot. No hosted SQL/cache/grant/booking changes were made. The deployed matching RPC is unavailable through its schema cache; absence versus stale cache remains unresolved. Postman CLI remains unavailable.
+    source: backend/app/observability.py; backend/tests/test_observability.py; backend/tests/test_schedule_preview.py; docs/backend/scheduling-logging.md
+    updated_at: "2026-11-10"
 fingerprints:
   - id: initial-mvp
     date: "2026-11-08"

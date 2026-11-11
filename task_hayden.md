@@ -182,20 +182,21 @@ Initial preference order:
 
 ## 9. Expose generation as a preview operation
 
-**Status:** complete and verified locally on 10 November 2026. The user requested implementation based on the proposal and a service-hosted test page. Applied the recommended whole-week, local-development scope. See [preview API and test page](docs/backend/schedule-preview-api.md).
+**Status:** complete and verified locally on 10 November 2026. The user confirmed selected-intake/group generation and local development with authentication deferred; these supersede the initial whole-week default. See [preview API and test page](docs/backend/schedule-preview-api.md).
 
 - [x] Add `POST /api/schedules/generate`.
-- [x] Accept a selected Monday teaching week; use server-configured solver options.
+- [x] Accept a selected Monday teaching week and required intake UUID, with an optional positive integer group number; omit the group to include all groups in the intake. Use server-configured solver options.
 - [x] Return proposed assignments, solver status, counts, diagnostic information, and search statistics.
 - [x] Explicitly identify quality optimization as disabled; quality measurements are deferred with step 8.
 - [x] Keep generation separate from committing actual bookings.
 - [x] Associate the preview with its input revision so later data changes can be detected.
-- [x] Schedule all pending occurrences jointly; restrict API/page/assets to direct localhost access in the development environment, with host/origin/proxy checks.
+- [x] Schedule only selected intake/group pending occurrences jointly while retaining all fixed bookings and cross-intake student conflicts. Bind the input revision to the selected scope. Restrict API/page/assets to direct localhost access in development, with host/origin/proxy checks.
 - [x] Make the operation usable through FastAPI's API documentation.
-- [x] Serve `/development/scheduling-test-hayden` with Monday selection, API submission, local-time preview table, diagnostics, errors, and raw JSON.
+- [x] Serve `/development/scheduling-test-hayden` with Monday/intake/group inputs, API submission, local-time preview table, diagnostics, errors, and raw JSON.
 - [x] Bound generation to one request per process and offload solver work so unrelated requests remain responsive.
+- [x] Add safe console/rotating-file traces and request IDs shown on the page, with actionable provider error categories. See [logging and RPC diagnosis](docs/backend/scheduling-logging.md).
 
-Verification: **29 focused API tests**, **230 full backend tests passed, 1 optional simulation test skipped**, and **10 DOM/page tests passed**, including served-page to real HTTP to synthetic PostgreSQL snapshot to solver to rendered response. Visual browser verification was blocked by an app-access approval timeout. Hosted database/migration readiness was not tested.
+Latest verification after logging: **47 focused logging/API tests**, **248 full backend tests passed, 1 optional simulation test skipped**, and **12 DOM/page tests passed**, including request correlation/privacy and the existing scope/conflict/HTTP guarantees. Visual browser verification remains unverified after the earlier app-access approval timeout. A read-only live RPC check now confirms HTTP 404/PGRST202; hosted generation is blocked until the matching snapshot function is installed/visible in the schema cache. No hosted migration/cache/grant change was performed.
 
 **Complete when:** timetable generation can be demonstrated through the API without a frontend or changes to actual bookings.
 

@@ -120,9 +120,11 @@ This engine produces a feasibility draft. Quality objectives are postponed; step
 
 ## Scheduling test page
 
-With FastAPI running, open **http://127.0.0.1:8000/development/scheduling-test-hayden**. Select a Monday and generate a preview of all pending classes for that week. The page sends a request to the same API and displays proposed classes in campus-local time, readable course/room labels, solver outcome, diagnostics, and raw JSON. It works without building Vue.
+With FastAPI running, open **http://127.0.0.1:8000/development/scheduling-test-hayden**. Select a Monday, enter the intake's database UUID and optionally a group number. Generate all pending classes for that intake, or only that group. The page sends a request to the same API and displays proposed classes in campus-local time, readable course/room labels, selected scope, solver outcome, diagnostics, and raw JSON. Other intakes' existing bookings remain fixed constraints. It works without building Vue.
 
 This is a read-only local-development tool: no bookings are saved and quality optimization is disabled. The API/page require `app.environment=development` and a direct localhost connection; remote/proxy access is rejected until authenticated access is implemented. Live generation requires configured Supabase access and the earlier teaching-plan/snapshot migrations and data. See [API contract, setup, and test evidence](docs/backend/schedule-preview-api.md).
+
+Scheduling requests now have a displayed `X-Request-ID` and safe JSON traces in the backend terminal and ignored `logs/scheduling.log`. Restart the backend to load logging changes, then watch with `Get-Content .\logs\scheduling.log -Tail 50 -Wait`. Provider `PGRST202` is reported as `SCHEDULING_RPC_NOT_FOUND`, with migration/cache guidance. See [logging and database setup diagnosis](docs/backend/scheduling-logging.md).
 
 ## API contract
 
@@ -131,7 +133,7 @@ This is a read-only local-development tool: no bookings are saved and quality op
 | `GET /api/health` | `200`: backend liveness, independent of Supabase |
 | `GET /api/config` | `200`: public `name`, `description`, `environment` |
 | `GET /api/health/database` | `200`: `connected`; `503`: `not_configured`, `error`, or `timeout` |
-| `POST /api/schedules/generate` | Development-only weekly preview; body `{"week_start":"2026-11-16"}`; no booking writes |
+| `POST /api/schedules/generate` | Development-only preview; required `week_start`, `intake_id` (UUID), optional positive integer `group_number`; no booking writes |
 | `GET /development/scheduling-test-hayden` | Development-only page for requesting and reviewing generated schedules |
 | `GET /docs` | Interactive OpenAPI reference |
 | `GET /openapi.json` | Generated, reusable API contract |
