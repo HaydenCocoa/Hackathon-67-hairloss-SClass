@@ -1,6 +1,12 @@
 # User-specific preferences (reserved for a later release)
 Config/preference.json
 
+# Build-time copy of Config/ made by the Vercel backend service (see vercel.json)
+backend/Config/
+
+# Vercel CLI project link and local build output
+.vercel/
+
 # Credentials and local environments
 .env
 .env.*
@@ -14,6 +20,8 @@ __pycache__/
 node_modules/
 frontend/dist/
 *.log
+logs/
 .sql-tools/
+.python-tools/
 .DS_Store
 .vscode/

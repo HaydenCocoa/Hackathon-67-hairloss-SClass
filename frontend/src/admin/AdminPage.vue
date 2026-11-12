@@ -1,4 +1,5 @@
 <script setup>
+Admin
 import { ref, computed } from 'vue'
 
 const token = ref('')
@@ -168,4 +169,22 @@ reset()
 </template>
 <style scoped>
 .admin-page{max-width:1100px;margin:auto;padding:36px;color:#253047} h1 span{color:#ea4335} h2,nav button{text-transform:capitalize} .access,.panel{background:white;border:1px solid #e2e7ef;border-radius:16px;padding:22px;margin:20px 0} .access{display:flex;align-items:end;gap:10px;flex-wrap:wrap;border-top:4px solid #fbbc04} label{display:block;text-transform:capitalize;font-size:14px;font-weight:600;margin-bottom:14px} input,select{display:block;width:100%;padding:10px;border:1px solid #cdd5e0;border-radius:8px;margin-top:6px} button{border:0;border-radius:8px;padding:10px 14px;cursor:pointer;background:#e8f0fe;color:#185abc} button.active,button[type=submit]{background:#4285f4;color:white} nav{display:flex;gap:8px;flex-wrap:wrap}.admin-grid{display:grid;grid-template-columns:1fr 2fr;gap:20px}.panel{margin:0}.panel:first-child{border-top:4px solid #a8dab5}.record{display:flex;justify-content:space-between;gap:10px;border-top:1px solid #e2e7ef;padding:15px 0}.record p{margin:4px 0}.notice{min-height:24px;color:#b3261e}@media(max-width:700px){.admin-grid{grid-template-columns:1fr}}
+
+// Admin Page: intentionally empty placeholder. The admin area is being built by
+// another team member; only the route, the admin-only access and the login exist.
+</script>
+
+<template>
+  <main class="admin-page">
+    <h1>Admin</h1>
+    <p>The admin area is under development.</p>
+    <p><a href="/admin/development/scheduling-test-hayden">Scheduling test page (development) ↗</a></p>
+  </main>
+</template>
+
+<style scoped>
+.admin-page { max-width: 960px; margin: 0 auto; padding: 48px 24px; }
+.admin-page p { color: #6d7968; }
+.admin-page a { color: #214f40; text-decoration: underline; }
+ main
 </style>

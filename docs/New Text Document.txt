@@ -1,0 +1,15 @@
+For the intake code structure, I would like to let
+100 students assigned to APU1F2611CS(CYB), divided to 3 group
+100 students assigned to APU1F2611CS, divided to 3 group
+100 students assigned to APU1F2611CS(DF), divided to 3 group
+40 students assigned to APU1F2611CS(SE), 1 group
+
+100 students assigned to APD1F2611CS(CYB), divided to 3 group
+100 students assigned to APD1F2611CS, divided to 3 group
+100 students assigned to APD1F2611CS(DF), divided to 3 group
+40 students assigned to APD1F2611CS(SE), 1 group
+
+80 students assigned to APD1F2407CS(CYB), APD2F2506CS(CYB), APD3F2609CS(CYB), divided to 2 group
+80 students assigned to APD1F2407CS, APD2F2506CS, APD3F2609CS, divided to 2 group
+80 students assigned to APD1F2507CS(CYB), APD2F2606CS(CYB), divided to 2 group
+80 students assigned to APD1F2507CS, APD2F2606CS(CYB), divided to 2 group
