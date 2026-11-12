@@ -626,6 +626,10 @@ Historical discussion; superseded by the implementation record below after the u
   - **Known infeasibility, accepted by the user:** the same 80 sample students are in all three intakes, so each would need 164 h a week. Generate Preview cannot place them all.
   - Removal switches off the lesson delete protection only inside its own transaction. It stops if a class session is linked to a lesson. Remove the plans before reverting the courses.
   - 27 new checks passed on the fully migrated schema; related suites still pass. Not run on hosted Supabase.
+  - **Reduced on 13 November 2026** at the user's request ("too much for sample data"); this supersedes the 164-plan version above:
+    - The user chose a small set that can be scheduled: three Semester 1 modules per intake (`CS301-INV/ALG/VAPT`, `CS201-ENTINV/OODJ/SDM`, `CS101-IDB/IN/PYP`), with nine different lecturers. That gives 36 plans and 504 lessons.
+    - The plan script stops if other CS(CYB) modules still have plans. The removal script still covers all 41 modules, so it also clears the old version.
+    - Real solver on a synthetic copy of the week (same 80 students, `seed_rooms.sql` rooms, configured settings): OPTIMAL, 36/36 placed in 91 s, no idle time. The plan test now passes 33 checks. Not run on hosted Supabase.
   - Details: [CS(CYB) course seed](cyb-course-seed.md#teaching-plans).
 - **Assumptions to confirm:** Year 3 module abbreviations are made up. Year 1/2 lecture+lab versus lecture+tutorial is inferred. Both Year 3 electives are included. Semesters are not stored. Details and the Year 3 teaching weeks: [CS(CYB) course seed](cyb-course-seed.md).
 - **Verification:** new `supabase/tests/courses-cyb.test.cjs` passed 39 checks on PGlite, run on both the legacy schema and the schema without the room column. `courses.test.cjs` still passes 20. Not run on hosted Supabase.

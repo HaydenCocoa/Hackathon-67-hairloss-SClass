@@ -48,47 +48,67 @@ At the user's request (12 November 2026), every code is `CS101-<module>` for Yea
 
 ## Teaching plans
 
-Added 12 November 2026 at the user's request:
+Scripts (first version 12 November 2026, reduced 13 November 2026 at the user's request):
 
 - [supabase/seed_teaching_plans_cyb.sql](../../supabase/seed_teaching_plans_cyb.sql) adds the plans.
 - [supabase/remove_teaching_plans_cyb.sql](../../supabase/remove_teaching_plans_cyb.sql) removes them.
 - Test: [supabase/tests/teaching-plans-cyb.test.cjs](../../supabase/tests/teaching-plans-cyb.test.cjs).
 
 **User decisions:**
-- All three intakes get plans in the **same weeks**. That covers all 41 modules from both semesters of each year, in every group.
-- **14 consecutive weeks**; breaks are not skipped.
-- **1 lesson a week** for each lecture, tutorial or lab of each group.
+- **A small set that can be scheduled** (13 November 2026, "the courses are too much for sample data"). Three Semester 1 modules per intake get plans:
+
+  | Intake | Modules | Lecturers |
+  | --- | --- | --- |
+  | `APD3F2609CS(CYB)` | `CS301-INV` (L/T), `CS301-ALG` (L/T), `CS301-VAPT` (L/LAB) | `LEC004`–`LEC006` |
+  | `APD2F2506CS(CYB)` | `CS201-ENTINV` (L/T), `CS201-OODJ` (L/LAB), `CS201-SDM` (L/T) | `LEC016`–`LEC018` |
+  | `APD1F2407CS(CYB)` | `CS101-IDB` (L/T), `CS101-IN` (L/LAB), `CS101-PYP` (L/LAB) | `LEC013`–`LEC015` |
+
+  These are the first three listed for each year. The nine lecturers are all different. The set includes the reused `CS101-IN`/`CS101-PYP`. The other 32 modules keep their courses and sections, but get no plan.
+- All three intakes in the **same weeks**: **14 consecutive weeks** (breaks are not skipped), **1 lesson a week** per lecture, tutorial or lab of each group.
 - The start Monday was not specified. The script uses **Mon 16 Nov 2026**, so the last lesson week starts 15 Feb 2027. Change `first_monday` at the top of the script to use another Monday.
+- Superseded: the 12 November version planned all 41 modules (164 plans, 2,296 lessons). It could not be scheduled, because the same 80 students needed 164 h a week.
+
+**How the numbers come about:** 9 modules × 2 teaching parts = 18 offerings. × 2 groups = **36 sections**, one plan each. × 14 weeks = **504 lessons** (12 plans and 168 lessons per intake). The plans are 18 lecture, 10 tutorial and 8 lab.
 
 **What the plan script does:**
-- Gives each cohort section one plan: 164 plans with 2 groups. The database then creates 2,296 required lessons (60/840, 56/784 and 48/672 per intake).
-- Assigns no times, rooms or class sessions; Generate Preview on `/admin/schedule` places them.
-- Stops if the migration `202611100001_teaching_requirements.sql` or the CS(CYB) courses are missing. It also stops if a section already has a different plan.
+- Adds the 36 plans. The database creates the lessons; no times, rooms or class sessions are assigned. Generate Preview on `/admin/schedule` places them.
+- Stops in these cases:
+  - the migration `202611100001_teaching_requirements.sql` or the CS(CYB) courses are missing;
+  - a planned section already has a different plan;
+  - **any other CS(CYB) module still has a plan**, for example from the 12 November version. That would bring the overload back, so run the removal script first.
 - Adds nothing when rerun.
 
-**Cannot be fully scheduled.** `seed_students.sql` puts the same 80 students in all three intakes. In every one of the 14 weeks, each student would have 82 two-hour classes (164 h) inside 47.5 open hours. Generate Preview for these intakes will report that the classes cannot all be placed. The user accepted this after being warned. Before the user chose, the warning quoted about 92 h a week; that figure counted only Semester 1 modules.
+**Schedulable, checked with the real solver.** `seed_students.sql` puts the same 80 students in all three intakes, in the same group, so each student has 18 two-hour classes (36 h) a week. A synthetic week mirrored the plans, the student groups and the `seed_rooms.sql` rooms, with no other bookings. Running the project's solver with its configured settings (120 s limit, preferences on):
+- **OPTIMAL: all 36 lessons placed**, in 91 s, of which 78 s improved the timetable.
+- No idle time between classes for students or lecturers.
+- 7, 8, 7, 8 and 6 classes Monday to Friday, across both groups.
+- 11 classes in labs and 25 in classrooms, with no auditorium.
+
+Bookings already in the hosted database (other intakes' classes or meetings) were not included. They can only add room clashes, because these students and lecturers have no other classes. The scratch check script was not added to the repository.
 
 **The removal script:**
-- Deletes every plan and lesson on the cohort's sections. It keeps courses, offerings, sections, intakes and other intakes' plans.
+- Deletes every plan and lesson on all 41 CS(CYB) modules: the 36 from the current script, plus any left from the 12 November version. It keeps courses, offerings, sections, intakes and other intakes' plans, including `APU1F2611CS(SE)`'s own `CS101-IN`/`CS101-PYP` sections.
 - **Deliberate exception:** the database normally refuses to delete a lesson ("cancel instead of deleting its identity"). The script switches off only the `validate_teaching_occurrence` trigger, and only inside its own transaction. It switches it back on before the transaction ends, so other sessions never see it off.
 - Stops, deleting nothing, if any class session is linked to one of these lessons, because a saved timetable keeps its lesson history.
 - Its final query shows `0, 0, O`; `O` means the protection is back on.
 
 **Undo order:** run `remove_teaching_plans_cyb.sql` first, then `revert_courses_cyb.sql`. The course revert refuses while plans exist.
 
-**Verification:** 27 checks passed (PGlite, mocked Supabase Auth). They ran on the schema after the hosted migrations: teaching requirements, room-column removal, `rescheduled` status and save audit. Covered:
+**Verification:** 33 checks passed (PGlite, mocked Supabase Auth). They ran on the schema after the hosted migrations: teaching requirements, room-column removal, `rescheduled` status and save audit. Covered:
 
 - missing migration or missing courses;
-- counts per intake;
+- per intake: 3 modules, 12 plans, 168 lessons;
+- exactly the nine chosen modules, with nine lecturers and 18/10/8 lecture/tutorial/lab plans;
 - 16 Nov 2026 start, 14 weeks, 1 a week, last week 15 Feb 2027;
-- 164 lessons waiting in the first week, with no class sessions created;
-- rerun adds nothing, and an existing different plan stops the script;
+- 36 lessons waiting in the first week, with no class sessions created;
+- rerun adds nothing;
+- a different plan on a planned section, or a plan on another CS(CYB) module, stops the script;
 - removal blocked by a linked class session;
-- removal keeps another intake's plan, and deleting a lesson is still refused afterwards;
+- removal keeps another intake's plan, also deletes plans on unplanned CS(CYB) modules, and deleting a lesson is still refused afterwards;
 - rerunning the removal;
 - the full undo order.
 
-The existing `teaching-requirements` (51), `courses` (20) and `courses-cyb` (75) suites still pass. Not run on hosted Supabase.
+The `courses-cyb` suite still passes (75). Not run on hosted Supabase.
 
 ## Year 3 calendar teaching weeks (reference, not used by the plan script)
 

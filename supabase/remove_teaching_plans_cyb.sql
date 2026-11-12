@@ -1,8 +1,12 @@
 -- SMART CAMPUS -- remove the CS(CYB) teaching plans
--- Deletes every teaching plan, and its teaching occurrences (required lessons),
--- on the class sections of seed_courses_cyb.sql: intakes APD1F2407CS(CYB),
--- APD2F2506CS(CYB) and APD3F2609CS(CYB), all 41 modules, every group.
--- Courses, offerings, sections, intakes and other intakes' plans are kept.
+-- Undoes seed_teaching_plans_cyb.sql: deletes its 36 teaching plans and 504
+-- teaching occurrences (required lessons) on the 9 planned modules
+-- (CS301-INV/ALG/VAPT, CS201-ENTINV/OODJ/SDM, CS101-IDB/IN/PYP).
+-- It checks all 41 CS(CYB) modules of APD1F2407CS(CYB), APD2F2506CS(CYB) and
+-- APD3F2609CS(CYB), every group, so it also removes the 164 plans of the
+-- earlier all-modules version if that was run.
+-- Courses, offerings, sections, intakes and other intakes' plans are kept,
+-- including APU1F2611CS(SE)'s own CS101-IN/PYP sections.
 --
 -- Occurrences are normally protected from deletion ("cancel instead of
 -- deleting"). This script switches off only that check
@@ -18,6 +22,7 @@ do $remove_teaching_plans_cyb$
 declare
   cohort_intakes constant text[] := array[
     'APD1F2407CS(CYB)', 'APD2F2506CS(CYB)', 'APD3F2609CS(CYB)'];
+  -- All 41 CS(CYB) module codes, a superset of the 9 planned ones.
   linked_codes constant text[] := array[
     'CS301-INV', 'CS301-ALG', 'CS301-VAPT', 'CS301-CIS', 'CS301-PM', 'CS301-DLID',
     'CS301-VB', 'CS301-IOT', 'CS301-PRJ', 'CS301-ADS', 'CS301-ASS', 'CS301-ACS',
