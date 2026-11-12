@@ -631,6 +631,20 @@ Historical discussion; superseded by the implementation record below after the u
     - The plan script stops if other CS(CYB) modules still have plans. The removal script still covers all 41 modules, so it also clears the old version.
     - Real solver on a synthetic copy of the week (same 80 students, `seed_rooms.sql` rooms, configured settings): OPTIMAL, 36/36 placed in 91 s, no idle time. The plan test now passes 33 checks. Not run on hosted Supabase.
   - Details: [CS(CYB) course seed](cyb-course-seed.md#teaching-plans).
+- **Removing other sample students (13 November 2026, user request):**
+  - [supabase/remove_students_except_cyb_se.sql](../../supabase/remove_students_except_cyb_se.sql) keeps only the students of the three CS(CYB) intakes and `APU1F2611CS(SE)` (confirmed instead of the `APD1F2611CS(SE)` first written).
+  - On the sample data it removes 880 students and 1,200 memberships, leaving 120.
+  - It stops if a kept intake is missing, or if a student to be removed has a login link.
+  - Undo by rerunning `seed_students.sql`.
+  - 20 checks passed locally; not run on hosted Supabase. Details: [CS(CYB) course seed](cyb-course-seed.md#removing-the-other-sample-students).
+- **Hosted state after the user's run and intake rename (13 November 2026):**
+  - The user ran the scripts on hosted Supabase, renamed the CYB intakes and removed the other intakes.
+  - Read-only queries confirmed four intakes: `APD1F2611CS(CYB)` (was `APD1F2407CS(CYB)`), `APD2F2611CS(CYB)` (was `APD2F2506CS(CYB)`), `APD3F2611CS(CYB)` (was `APD3F2609CS(CYB)`) and `APU1F2611CS(SE)`.
+  - Students: 121 (one without an intake) with 280 memberships.
+  - Courses: 85, including a stray test course `ur mom` with no offering. 88 offerings.
+  - Plans: 42, of which 36 are CS(CYB) and 6 SE. Class sessions: 8, all SE.
+  - **The CS(CYB) scripts and `seed_students.sql` still use the old codes.** Do not rerun `seed_courses_cyb.sql` or `seed_students.sql`. The other scripts stop or do nothing until their codes are updated.
+  - Documentation only; no data changed. Table: [hosted state](cyb-course-seed.md#hosted-database-state--13-november-2026).
 - **Assumptions to confirm:** Year 3 module abbreviations are made up. Year 1/2 lecture+lab versus lecture+tutorial is inferred. Both Year 3 electives are included. Semesters are not stored. Details and the Year 3 teaching weeks: [CS(CYB) course seed](cyb-course-seed.md).
 - **Verification:** new `supabase/tests/courses-cyb.test.cjs` passed 39 checks on PGlite, run on both the legacy schema and the schema without the room column. `courses.test.cjs` still passes 20. Not run on hosted Supabase.
 

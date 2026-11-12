@@ -2,6 +2,41 @@
 
 Date: 12 November 2026. Script: [supabase/seed_courses_cyb.sql](../../supabase/seed_courses_cyb.sql). Test: [supabase/tests/courses-cyb.test.cjs](../../supabase/tests/courses-cyb.test.cjs). Back to the [backend record](agents.md).
 
+## Hosted database state — 13 November 2026
+
+The user ran the scripts on hosted Supabase: the course seed, the 9-module teaching plans and the student removal. The user then renamed the intakes to 2611 codes and removed the other intakes. Read-only queries on 13 November 2026 found the following:
+
+| Intake now | Was | Students (group 1 / 2) | Offerings | Teaching plans |
+| --- | --- | --- | ---: | ---: |
+| `APD1F2611CS(CYB)` | `APD1F2407CS(CYB)` (Year 1) | 80 (40 / 40) | 30 | 12 |
+| `APD2F2611CS(CYB)` | `APD2F2506CS(CYB)` (Year 2) | 80 (40 / 40) | 28 | 12 |
+| `APD3F2611CS(CYB)` | `APD3F2609CS(CYB)` (Year 3) | 80 (40 / 40) | 24 | 12 |
+| `APU1F2611CS(SE)` | unchanged | 40 (40 / –) | 6 | 6 |
+
+- **Intakes:** these four only. The other 14 sample intakes are gone, including the earlier `APD1F2611CS(CYB)`, `APD1F2611CS(SE)` and other 2611 intakes. The old-to-new mapping follows from the offering counts and course codes. The same 80 students are still in all three CYB intakes.
+- **Students:** 121 students and 280 memberships. One student has no intake. One student record is linked to a login account.
+- **Courses:**
+  - 85 course rows, 88 offerings and 170 sections.
+  - One course row has no offering: `ur mom` (lecture), which looks like test data. It is not from these scripts.
+- **Teaching plans:**
+  - 42 plans and 588 lessons, all starting 16 Nov 2026 for 14 weeks, one lesson a week.
+  - 36 plans are the CS(CYB) sample (`CS101-IDB/IN/PYP`, `CS201-ENTINV/OODJ/SDM`, `CS301-INV/ALG/VAPT`).
+  - 6 belong to `APU1F2611CS(SE)`; those were not created by these scripts.
+- **Class sessions:** 8, all for `APU1F2611CS(SE)`. The CYB intakes have no saved classes yet.
+
+**The scripts still use the old intake codes.** At the user's request, only the documentation was updated. Running a script now behaves like this:
+
+| Script | Effect if run now |
+| --- | --- |
+| `seed_courses_cyb.sql` | **Do not run.** It would create three new empty intakes with the old codes and give them a second copy of the offerings. |
+| `seed_students.sql` | **Do not run.** It would bring back the 18 old intakes and all 1,000 sample students. |
+| `seed_teaching_plans_cyb.sql` | Stops ("Expected 18 offerings … found 0"); changes nothing. |
+| `remove_teaching_plans_cyb.sql` | Finds no plans under the old codes and does nothing. The 36 plans stay. |
+| `revert_courses_cyb.sql` | Finds no offerings under the old codes and deletes nothing, because every CS(CYB) course is still used by the renamed intakes. |
+| `remove_students_except_cyb_se.sql` | Stops ("Only 1 of the 4 kept intakes exist"); changes nothing. |
+
+To use the remove or revert scripts again, replace the three old CYB codes with the 2611 codes first.
+
 ## Requirement
 
 The user asked for course and intake data for the CS(CYB) cohort, covering the same modules their own intake takes. Year 1 and Year 2 modules come from the user's interim transcripts. Year 3 modules come from the `APD3F2609CS(CYB)` programme schedule. Internship is excluded. No student, grade or attendance data from the transcripts is stored in the seed or in this note.
@@ -109,6 +144,29 @@ Bookings already in the hosted database (other intakes' classes or meetings) wer
 - the full undo order.
 
 The `courses-cyb` suite still passes (75). Not run on hosted Supabase.
+
+## Removing the other sample students
+
+[supabase/remove_students_except_cyb_se.sql](../../supabase/remove_students_except_cyb_se.sql), added 13 November 2026 at the user's request. Test: [supabase/tests/remove-students.test.cjs](../../supabase/tests/remove-students.test.cjs).
+
+- **Kept intakes:** the three CS(CYB) intakes and `APU1F2611CS(SE)`. The user first wrote `APD1F2611CS(SE)`, then confirmed `APU1F2611CS(SE)`, the SE intake that has the `seed_courses.sql` classes.
+- **Removes** every student who belongs only to other intakes, with their memberships and meeting attendance. On the sample data that is 880 of the 1,000 students and 1,200 of the 1,480 memberships. It leaves 120 students: 80 in each CS(CYB) intake (40 per group) and 40 in `APU1F2611CS(SE)`.
+- **Other cases:**
+  - A student who is also in a kept intake is kept, but loses memberships elsewhere, so the other intakes end up empty.
+  - Students with no membership are not touched.
+  - Intakes, courses, sessions, meetings, plans and Auth accounts are kept.
+- **Stops, deleting nothing:**
+  - if a kept intake code does not exist (a typo would otherwise delete that intake's students);
+  - if a student to be removed is linked to a login account, unless `remove_linked_accounts` is set to `true` in the script.
+- **Undo:** rerun `seed_students.sql`. Removed students come back with new UUIDs and no login link.
+- **Verification:** 20 checks passed (PGlite, mocked Supabase Auth) on the real 1,000-student seed. They cover:
+  - the counts above, with unchanged kept memberships and group sizes;
+  - the mixed-membership and no-membership cases;
+  - meeting attendance;
+  - the login-link guard and the typo guard;
+  - rerunning the script, and restoring with `seed_students.sql`.
+
+  Not run on hosted Supabase.
 
 ## Year 3 calendar teaching weeks (reference, not used by the plan script)
 
