@@ -402,7 +402,7 @@ Historical discussion; superseded by the implementation record below after the u
   - Confirm the two interpretations (gap scope, capacity-based auditorium rule).
   - Decide whether to add a "fewer days on campus" preference.
   - Check preview time on hosting.
-- **Time limit raised (12 November 2026):** at the user's request `scheduling.solver.max_time_seconds` is now 120 s (was 10 s). An unlimited value is not supported (0 and infinity are rejected at startup). With preferences on, a preview can take up to about 2 minutes plus loading time, holding the one-at-a-time slot.
+- **Time limit raised (12 November 2026):** at the user's request `scheduling.solver.max_time_seconds` is now 120 s (was 10 s). **Raised again to 280 s on 13 November 2026** (see that entry). An unlimited value is not supported (0 and infinity are rejected at startup). With preferences on, a preview can take up to about 2 minutes plus loading time, holding the one-at-a-time slot.
 
 ## `main` merge repair — 12 November 2026
 
@@ -693,3 +693,20 @@ Historical discussion; superseded by the implementation record below after the u
   - Frontend: `lecturer.test.js` 30/30, after updating three tests that encoded 08:00 and "labs only a lab".
   - Full backend suite: 406 passed, 10 failed, 1 skipped. Only the 10 older loader/preview failures remain; the two lecturer failures from `main` are fixed. Other PGlite suites still pass (`rescheduled-status` 33, `save-audit` 46). Frontend unit tests all pass and `npm run build` succeeds.
   - Not run against hosted Supabase or on Vercel; the lecturer page was not opened in a browser.
+
+## Scheduling time limit of 5 minutes — 13 November 2026
+
+- **Requirement (user):** "expand the configuration to let the system allows up to 5 minute on scheduling".
+- **Decision (user, 13 November 2026):** the **whole** scheduling request should take at most 5 minutes, on any Vercel plan. The alternative was a 300 s search plus `maxDuration` 360 s in `vercel.json`, which needs Vercel Pro (Hobby is capped at 300 s).
+- **Change:**
+  - `Config/config.json` `scheduling.solver.max_time_seconds` is now **280** (was 120). That leaves about 20 s of Vercel's 300 s function limit for loading the week, building the model and checking the result.
+  - `/admin/schedule` now says a preview "can take up to about five minutes".
+  - The docs were updated: timetable quality, preview API, CP-SAT, README and [Vercel deployment](vercel-deployment.md#scheduling-on-vercel-since-12-november-2026).
+  - `vercel.json` is unchanged.
+- **Effect:**
+  - With preferences on, a preview usually runs for the whole limit. It now waits up to about 4 min 40 s for the search, and holds the one-at-a-time slot (`GENERATION_BUSY`) for that long.
+  - Saving is not affected; it does not run the solver.
+- **Limits:**
+  - If loading the week from Supabase takes longer than about 20 s, Vercel stops the request at 300 s. The page then shows the `SERVER_TIMEOUT` message.
+  - Vercel notes that idle HTTP/1.1 connections may be closed by network layers during long requests. Not checked on the live site.
+- **Verification:** the configuration loads with the new value (`load_settings()`), and the preview tests pass. Not run on Vercel.
