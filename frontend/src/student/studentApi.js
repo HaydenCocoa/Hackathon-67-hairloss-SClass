@@ -16,6 +16,7 @@ export async function fetchTimetable(studentCode, start, end) {
   let response
   try {
     response = await fetch(`/api/student/${encodeURIComponent(studentCode)}/timetable?${params}`, {
+      credentials: 'same-origin', // send the login cookie
       headers: { Accept: 'application/json' },
       signal: AbortSignal.timeout(15000),
     })
@@ -29,7 +30,7 @@ export async function fetchTimetable(studentCode, start, end) {
     // Vite returns an empty 500 when FastAPI is not running.
   }
   if (!response.ok) {
-    const detail = typeof body?.detail === 'string' ? body.detail : null
+    const detail = typeof body?.detail === 'string' ? body.detail : body?.detail?.message || null
     const fallback = response.status >= 500
       ? 'The backend is not available right now.'
       : 'The timetable could not be loaded.'

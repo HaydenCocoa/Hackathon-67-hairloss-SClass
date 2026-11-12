@@ -1,6 +1,6 @@
 # Student Page (Bi Jin)
 
-Open **http://127.0.0.1:5173/#/student** (or click *Student timetable* in the main menu sidebar).
+Log in as a student and you land on **http://127.0.0.1:5173/student**. App.vue passes the signed-in student's code as `<StudentPage :student-code="session.code" />`.
 
 ## What it does
 
@@ -9,18 +9,19 @@ Open **http://127.0.0.1:5173/#/student** (or click *Student timetable* in the ma
 - Cancelled classes are red and struck through; rescheduled classes get a yellow "Moved" badge. The side panel lists every cancellation and reschedule from the last 14 days.
 - Click any class for details: time, room, lecturer, intake/group, and what changed (old time/room, reason).
 - Meetings the student is invited to (`meeting_students`) appear as dashed green blocks.
-- "Try with sample data" loads a built-in demo week, so the page can be shown before real classes exist in Supabase.
+- If the login expires, the page sends the user back to `/login` and returns to `/student` afterwards.
+- If the account has no linked student record, the page says so instead of showing an empty timetable.
 
 ## Files
 
 | File | Purpose |
 | --- | --- |
-| `StudentPage.vue` | Page layout, temporary sign-in, week navigation, summary, side panel |
+| `StudentPage.vue` | Page layout, week navigation, summary, side panel |
 | `WeekTimetable.vue` | Calendar grid (handles overlapping classes side by side) |
 | `AgendaList.vue` | List view grouped by day |
 | `SessionDialog.vue` | Class / meeting details pop-up |
 | `studentApi.js` | Calls the FastAPI endpoint |
-| `demoData.js` | Sample week in the same shape as the API response |
+| `demoData.js` | Sample week in the same shape as the API response (not used by the page; kept for tests/demos) |
 | `student.css` | Theme colours (white, blue, red, yellow, green), scoped under `.sp` |
 | `../../../backend/app/student.py` | FastAPI routes (see below) |
 
@@ -33,6 +34,6 @@ Try it at http://127.0.0.1:8000/docs. The backend uses the server key from `.env
 
 ## Notes for the team
 
-- **Login (Hayden):** until login exists, the student types their code (stored in `localStorage`). When login is ready, render `<StudentPage :student-code="signedInCode" />`. The backend should then take the student from the session instead of the URL, so students can only view their own timetable (see the TODO in `student.py`).
+- **Login (Hayden):** done. The backend only lets a student open their own code (admins can open any).
 - **Reschedule/cancel (Ting Ju / Edward):** when writing `schedule_changes`, put `starts_at` and `room_id` in `old_values` / `new_values` (e.g. `{"starts_at": "...", "room_id": "..."}`). The Student Page reads these keys to show "was → now". Set `class_sessions.status = 'cancelled'` for cancellations.
 - Request-a-meeting (optional feature) is not built yet: `meeting_sessions.status` only allows `scheduled`/`cancelled`, so a request/approval status or table is needed first.
