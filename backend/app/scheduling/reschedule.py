@@ -14,6 +14,10 @@ Saving re-checks the move against fresh data, then calls the database function
 `public.admin_reschedule_class` (migrations 202611110001 + 202611120003), which takes the timetable lock,
 re-checks clashes, marks the class `rescheduled` and writes the audit row in one transaction.
 See docs/backend/admin-reschedule-api.md.
+
+The module-level helpers (roster, target-week snapshot, `explain`, the start grid and `run_move_function`)
+are shared with the lecturer endpoint (backend/app/lecturer.py), which calls
+`public.lecturer_reschedule_class` (migration 202611120004) instead.
 """
 
 import logging
@@ -152,6 +156,106 @@ def moving_snapshot(snapshot: SchedulingSnapshot, row: dict, student_ids: frozen
     })
 
 
+async def load_roster(db: Supabase, row: dict) -> frozenset[UUID]:
+    """Every student of the class's intake and group (paged)."""
+    students: list[str] = []
+    while True:
+        page = await db.get("student_intakes", [
+            ("select", "student_id"), ("intake_id", f"eq.{row['intake_id']}"),
+            ("group_number", f"eq.{row['group_number']}"), ("order", "student_id.asc"),
+            ("limit", "1000"), ("offset", str(len(students))),
+        ])
+        students.extend(item["student_id"] for item in page)
+        if len(page) < 1000:
+            break
+    return frozenset(UUID(str(item)) for item in students)
+
+
+async def load_target_snapshot(db: Supabase, scheduling, row: dict, students: frozenset[UUID],
+                               day: date) -> SchedulingSnapshot:
+    """The week containing `day`, prepared for moving this class (see moving_snapshot)."""
+    snapshot = await load_scheduling_snapshot(db, scheduling, day - timedelta(days=day.weekday()))
+    return moving_snapshot(snapshot, row, students)
+
+
+def explain(validator: BookingValidator, occurrence: UUID, starts_at: datetime, rooms) -> tuple[list[Issue], dict, list]:
+    """Validate one start in every room: time-wide issues, per-room issues, and the free rooms."""
+    time_issues: dict[str, Issue] = {}
+    if starts_at <= datetime.now(timezone.utc):
+        time_issues["IN_PAST"] = Issue(code="IN_PAST", detail="This time has already passed.")
+    room_issues, free = {}, []
+    for room in rooms:
+        checked = validator.validate(BookingProposal(occurrence_id=occurrence, room_id=room.id, starts_at=starts_at))
+        mine = [Issue(code=item.code, detail=item.detail) for item in checked.issues if item.code in ROOM_CODES]
+        for item in checked.issues:
+            if item.code not in ROOM_CODES:
+                time_issues.setdefault(item.code, Issue(code=item.code, detail=item.detail))
+        if mine:
+            room_issues[str(room.id)] = list({issue.code: issue for issue in mine}.values())
+        elif not time_issues:
+            free.append(room.id)
+    return list(time_issues.values()), room_issues, ([] if time_issues else free)
+
+
+def start_grid(snapshot: SchedulingSnapshot, day: date, duration: timedelta, step_minutes: int) -> list[datetime]:
+    """Start times on `day` every step_minutes from each opening window's start, where the class fits."""
+    starts: set[datetime] = set()
+    for window in snapshot.opening_windows:
+        if window.day != day:
+            continue
+        moment = window.starts_at
+        while moment + duration <= window.ends_at:
+            starts.add(moment)
+            moment += timedelta(minutes=step_minutes)
+    return sorted(starts)
+
+
+def free_room_ids(ranges, moment: datetime) -> list[UUID]:
+    """Rooms whose candidate range (CandidateGenerator: suitable rooms only) allows this start."""
+    return sorted({item.room_id for item in ranges if item.earliest_start <= moment <= item.latest_start}, key=str)
+
+
+class MoveFailed(Exception):
+    """The database function refused or failed the move; nothing was changed unless code says otherwise."""
+
+    def __init__(self, status: int, code: str, message: str):
+        super().__init__(code)
+        self.status, self.code, self.message = status, code, message
+
+
+async def run_move_function(db: Supabase, token: str, function: str, payload: dict, *,
+                            forbidden: str, migrations: str) -> None:
+    """Call admin_reschedule_class / lecturer_reschedule_class as the logged-in user (auth.uid()).
+    Raises MoveFailed with a safe message; provider text is never passed on."""
+    try:
+        reply = await db.client.post(
+            f"{db.url}/rest/v1/rpc/{function}", headers={**db.headers, "Authorization": f"Bearer {token}"},
+            json=payload, timeout=db.timeout,
+        )
+    except httpx.TimeoutException as exc:
+        raise MoveFailed(504, "RESCHEDULE_OUTCOME_UNKNOWN", "The database did not answer in time; the class may or may "
+                         "not have moved. Reload the timetable before trying again.") from exc
+    except httpx.RequestError as exc:
+        raise MoveFailed(502, "DATABASE_UNAVAILABLE", "Could not reach the database. Nothing was changed.") from exc
+    if reply.status_code < 400:
+        return
+    try:
+        code = reply.json().get("code")
+    except (ValueError, AttributeError):
+        code = None
+    missing = (503, "MIGRATION_MISSING", f"The database is missing the rescheduling migrations ({migrations}). "
+                                         "Nothing was changed.")
+    known = {
+        "23P01": (409, "SLOT_TAKEN", "Someone booked that room or time a moment ago. Nothing was changed; choose again."),
+        "40001": (409, "CLASS_CHANGED", "This class was changed by someone else. Reload and try again."),
+        "22023": (409, "MOVE_REJECTED", "The database refused this move (status, room suitability or capacity)."),
+        "P0002": (404, "CLASS_NOT_FOUND", "This class does not exist or was removed."),
+        "42501": (403, "FORBIDDEN", forbidden),
+        "PGRST202": missing, "42883": missing, "42703": missing,
+    }
+    raise MoveFailed(*known.get(code, (502, "DATABASE_REJECTED", "The database could not move the class. Nothing was changed.")))
+
+
 def create_reschedule_router(settings: Settings) -> APIRouter:
     zone = ZoneInfo(settings.scheduling.timezone)
     router = APIRouter(prefix="/api/admin/timetable", tags=["admin rescheduling"])
@@ -177,39 +281,10 @@ def create_reschedule_router(settings: Settings) -> APIRouter:
         if _ts(row["starts_at"]) <= datetime.now(timezone.utc):
             raise failure(409, "CLASS_STARTED", "This class has already started, so it can no longer be moved.",
                           "reschedule_rejected")
-        students: list[str] = []
-        while True:
-            page = await db.get("student_intakes", [
-                ("select", "student_id"), ("intake_id", f"eq.{row['intake_id']}"),
-                ("group_number", f"eq.{row['group_number']}"), ("order", "student_id.asc"),
-                ("limit", "1000"), ("offset", str(len(students))),
-            ])
-            students.extend(item["student_id"] for item in page)
-            if len(page) < 1000:
-                break
-        return row, frozenset(UUID(str(item)) for item in students)
+        return row, await load_roster(db, row)
 
     async def target_snapshot(db: Supabase, row: dict, students: frozenset[UUID], day: date) -> SchedulingSnapshot:
-        snapshot = await load_scheduling_snapshot(db, settings.scheduling, day - timedelta(days=day.weekday()))
-        return moving_snapshot(snapshot, row, students)
-
-    def explain(validator: BookingValidator, occurrence: UUID, starts_at: datetime, rooms) -> tuple[list[Issue], dict, list]:
-        """Validate one start in every room: time-wide issues, per-room issues, and the free rooms."""
-        time_issues: dict[str, Issue] = {}
-        if starts_at <= datetime.now(timezone.utc):
-            time_issues["IN_PAST"] = Issue(code="IN_PAST", detail="This time has already passed.")
-        room_issues, free = {}, []
-        for room in rooms:
-            checked = validator.validate(BookingProposal(occurrence_id=occurrence, room_id=room.id, starts_at=starts_at))
-            mine = [Issue(code=item.code, detail=item.detail) for item in checked.issues if item.code in ROOM_CODES]
-            for item in checked.issues:
-                if item.code not in ROOM_CODES:
-                    time_issues.setdefault(item.code, Issue(code=item.code, detail=item.detail))
-            if mine:
-                room_issues[str(room.id)] = list({issue.code: issue for issue in mine}.values())
-            elif not time_issues:
-                free.append(room.id)
-        return list(time_issues.values()), room_issues, ([] if time_issues else free)
+        return await load_target_snapshot(db, settings.scheduling, row, students, day)
 
     def local(moment: datetime) -> str:
         return moment.astimezone(zone).strftime("%H:%M")
@@ -260,20 +335,12 @@ def create_reschedule_router(settings: Settings) -> APIRouter:
         ranges = CandidateGenerator(snapshot).generate(occurrence).ranges
         now = datetime.now(timezone.utc)
         current = _ts(row["starts_at"])
-        starts: set[datetime] = set()
-        for window in snapshot.opening_windows:
-            if window.day != day:
-                continue
-            moment = window.starts_at
-            while moment + duration <= window.ends_at:
-                starts.add(moment)
-                moment += timedelta(minutes=SLOT_MINUTES)
+        starts = set(start_grid(snapshot, day, duration, SLOT_MINUTES))
         if current.astimezone(zone).date() == day:
             starts.add(current)  # keep the class's own (possibly off-grid) time selectable
         slots = []
         for moment in sorted(starts):
-            free = [] if moment <= now else sorted(
-                {item.room_id for item in ranges if item.earliest_start <= moment <= item.latest_start}, key=str)
+            free = [] if moment <= now else free_room_ids(ranges, moment)
             slots.append(Slot(start=local(moment), end=local(moment + duration), starts_at=moment, free_room_ids=free))
 
         selected = None
@@ -327,37 +394,16 @@ def create_reschedule_router(settings: Settings) -> APIRouter:
         token = getattr(request.state, "access_token", None)
         if not token:
             raise failure(401, "AUTH_REQUIRED", "Log in again to reschedule classes.", "reschedule_rejected")
+        payload = {"session_id": str(session_id), "expected_start": body.expected_starts_at.isoformat(),
+                   "expected_room": str(body.expected_room_id), "new_start": body.starts_at.isoformat(),
+                   "new_room": str(body.room_id), "change_reason": body.reason or NO_REASON_TEXT}
         try:
-            reply = await db.client.post(
-                f"{db.url}/rest/v1/rpc/admin_reschedule_class", headers={**db.headers, "Authorization": f"Bearer {token}"},
-                json={"session_id": str(session_id), "expected_start": body.expected_starts_at.isoformat(),
-                      "expected_room": str(body.expected_room_id), "new_start": body.starts_at.isoformat(),
-                      "new_room": str(body.room_id), "change_reason": body.reason or NO_REASON_TEXT},
-                timeout=db.timeout,
-            )
-        except httpx.TimeoutException as exc:
-            raise failure(504, "RESCHEDULE_OUTCOME_UNKNOWN", "The database did not answer in time; the class may or may "
-                          "not have moved. Reload the timetable before trying again.", "reschedule_rejected") from exc
-        except httpx.RequestError as exc:
-            raise failure(502, "DATABASE_UNAVAILABLE", "Could not reach the database. Nothing was changed.",
-                          "reschedule_rejected") from exc
-        if reply.status_code >= 400:
-            try:
-                code = reply.json().get("code")
-            except ValueError:
-                code = None
-            known = {
-                "23P01": (409, "SLOT_TAKEN", "Someone booked that room or time a moment ago. Nothing was changed; choose again."),
-                "40001": (409, "CLASS_CHANGED", "This class was changed by someone else. Reload and try again."),
-                "22023": (409, "MOVE_REJECTED", "The database refused this move (status, room suitability or capacity)."),
-                "P0002": (404, "CLASS_NOT_FOUND", "This class does not exist or was removed."),
-                "42501": (403, "ADMIN_REQUIRED", "The database did not accept your administrator account."),
-                "PGRST202": (503, "MIGRATION_MISSING", "The admin timetable migrations (202611110001, 202611120003) are not applied."),
-                "42883": (503, "MIGRATION_MISSING", "The admin timetable migrations (202611110001, 202611120003) are not applied."),
-                "42703": (503, "MIGRATION_MISSING", "Apply migration 202611120003_admin_reschedule_fixes.sql."),
-            }
-            status, error, message = known.get(code, (502, "DATABASE_REJECTED", "The database could not move the class. Nothing was changed."))
-            raise failure(status, error, message, "reschedule_rejected")
+            await run_move_function(db, token, "admin_reschedule_class", payload,
+                                    forbidden="The database did not accept your administrator account.",
+                                    migrations="202611110001, 202611120003")
+        except MoveFailed as exc:
+            code = "ADMIN_REQUIRED" if exc.code == "FORBIDDEN" else exc.code
+            raise failure(exc.status, code, exc.message, "reschedule_rejected") from exc
         event("reschedule_completed")
         return RescheduleResult(session_id=session_id, starts_at=body.starts_at,
                                 ends_at=body.starts_at + timedelta(minutes=row["duration_minutes"]), room_id=body.room_id)

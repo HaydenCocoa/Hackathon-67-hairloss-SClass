@@ -208,26 +208,26 @@ test('demo reschedule: others cannot move my class, past classes cannot be moved
   await assert.rejects(api.suggestSlots(LECTURER, monday.id, { date: '2026-11-13', time: '10:00' }), { message: /already started/ })
 })
 
-// ---- timetable rules: Monday to Friday, 08:00-18:00, 15 minutes between classes, room type by course type ----
+// ---- timetable rules: Monday to Friday, 08:30-18:00, 15 minutes between classes, room type by course type ----
 // Now is Tue 10 Nov 2026 10:00 (KL). Aisha's Thursday 12 Nov CS201 lecture (120 min, intake I2 group 1, needs a classroom).
 
-test('demo suggestions never offer a weekend, or a time outside 08:00-18:00', async () => {
+test('demo suggestions never offer a weekend, or a time outside 08:30-18:00', async () => {
   const api = demo()
   const session = await aishaThursdayLecture(api)
   const slots = await api.suggestSlots(LECTURER, session.id, { date: '2026-11-14', time: '10:00', flexDays: 3, limit: 20 }) // a Saturday
   assert.ok(slots.length > 0)
   for (const slot of slots) {
     assert.ok(!['2026-11-14', '2026-11-15'].includes(slot.session_date), `${slot.session_date} is a weekend`)
-    assert.ok(minutes(slot.start_time) >= 8 * 60 && minutes(slot.end_time) <= 18 * 60, `${slot.start_time}-${slot.end_time} is outside 08:00-18:00`)
+    assert.ok(minutes(slot.start_time) >= 8 * 60 + 30 && minutes(slot.end_time) <= 18 * 60, `${slot.start_time}-${slot.end_time} is outside 08:30-18:00`)
   }
   assert.deepEqual(await api.suggestSlots(LECTURER, session.id, { date: '2026-11-14', time: '10:00', flexDays: 0 }), [])
 })
 
-test('demo reschedule refuses weekends and times outside 08:00-18:00', async () => {
+test('demo reschedule refuses weekends and times outside 08:30-18:00', async () => {
   const api = demo()
   const session = await aishaThursdayLecture(api)
   await assert.rejects(api.reschedule(LECTURER, session.id, { session_date: '2026-11-14', start_time: '10:00', room_id: 'demo-room-3' }), { message: /Monday to Friday/ })
-  await assert.rejects(api.reschedule(LECTURER, session.id, { session_date: '2026-11-13', start_time: '07:30', room_id: 'demo-room-3' }), { message: /08:00 or later and finish by 18:00/ })
+  await assert.rejects(api.reschedule(LECTURER, session.id, { session_date: '2026-11-13', start_time: '08:00', room_id: 'demo-room-3' }), { message: /08:30 or later and finish by 18:00/ })
   await assert.rejects(api.reschedule(LECTURER, session.id, { session_date: '2026-11-13', start_time: '16:30', room_id: 'demo-room-3' }), { message: /finish by 18:00/ })
 })
 
@@ -248,15 +248,16 @@ test('demo: a room that is booked (and nothing else clashes) is refused, with a 
   assert.equal(moved.start_time ?? '12:15', '12:15')
 })
 
-test('demo: lectures may use a classroom or an auditorium, labs only a lab', async () => {
+test('demo: room policy from the config: lectures use classrooms or auditoriums, labs classrooms or labs', async () => {
   const api = demo()
   const week = await api.getTimetable(LECTURER, { start: '2026-11-23', end: '2026-11-29' }) // in two weeks: nothing has started, nothing is cancelled
   const lecture = week.find((s) => s.course_type === 'lecture' && s.can_reschedule)
   const lab = week.find((s) => s.course_type === 'lab' && s.can_reschedule)
   assert.deepEqual(lecture.allowed_room_types, ['classroom', 'auditorium'])
-  assert.deepEqual(lab.allowed_room_types, ['lab'])
+  assert.deepEqual(lab.allowed_room_types, ['classroom', 'lab'])
   const labSlots = await api.suggestSlots(LECTURER, lab.id, { date: '2026-11-13', time: '10:00', flexDays: 1, limit: 20 })
-  assert.ok(labSlots.length > 0 && labSlots.every((s) => ['Lab 1', 'Lab 2'].includes(s.room_name)), 'a lab class is only offered labs')
+  assert.ok(labSlots.length > 0, 'a lab class gets suggestions')
+  assert.ok(labSlots.every((s) => !s.room_name.startsWith('Hall')), 'a lab class is never offered an auditorium')
   const lectureSlots = await api.suggestSlots(LECTURER, lecture.id, { date: '2026-11-20', time: '10:00', flexDays: 2, limit: 30 })
   assert.ok(lectureSlots.every((s) => !s.room_name.startsWith('Lab')), 'a lecture is never offered a lab')
 })
@@ -278,7 +279,7 @@ test('the demo timetable and the classes you can still move come out in order', 
   assert.deepEqual([...upcoming].sort(bySlot), upcoming)
 })
 
-// ---- the date and start time must be inside the opening days and hours (Mon-Fri, 08:00-18:00) ----
+// ---- the date and start time must be inside the opening days and hours (Mon-Fri, 08:30-18:00) ----
 const TODAY = '2026-11-12' // a Thursday
 const problem = (date, time, minutes = 120, now = '10:00') => requestProblems(date, time, minutes, TODAY, now)
 
@@ -297,12 +298,13 @@ test('a date in the past is refused; today is fine', () => {
   assert.equal(problem(TODAY, '14:00').date, '')
 })
 
-test('start times: not before 08:00, and the class must finish by 18:00', () => {
+test('start times: not before 08:30, and the class must finish by 18:00', () => {
   assert.equal(latestStart(120), '16:00')
   assert.equal(latestStart(90), '16:30')
   assert.equal(latestStart(700), null)
-  assert.match(problem('2026-11-13', '07:59').time, /8:00 AM or later/)
-  assert.equal(problem('2026-11-13', '08:00').time, '')
+  assert.match(problem('2026-11-13', '08:29').time, /8:30 AM or later/)
+  assert.match(problem('2026-11-13', '08:00').time, /8:30 AM or later/) // the old 08:00 opening is gone
+  assert.equal(problem('2026-11-13', '08:30').time, '')
   assert.equal(problem('2026-11-13', '16:00').time, '') // 16:00 + 120 min = 18:00 exactly
   assert.match(problem('2026-11-13', '16:01').time, /must start by 4:00 PM/)
   assert.match(problem('2026-11-13', '17:30').time, /finish by 6:00 PM/)

@@ -171,7 +171,7 @@ async function confirm() {
           <select id="lc-flex" v-model="form.flex">
             <option v-for="f in FLEXIBILITY" :key="f.value" :value="f.value">{{ f.label }}</option>
           </select>
-          <p class="lc-hint">We check the timetable and suggest free times and rooms nearest to your request. Classes run Monday to Friday, 08:00 to 18:00, with at least 15 minutes between classes.</p>
+          <p class="lc-hint">We check the timetable and suggest free times and rooms nearest to your request. Classes run Monday to Friday, 08:30 to 18:00, with at least 15 minutes between classes.</p>
         </div>
 
         <div class="lc-field">

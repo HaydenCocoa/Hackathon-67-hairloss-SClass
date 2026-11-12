@@ -50,7 +50,7 @@ Status on 12 November 2026. The dated entries further down give the detail and t
   - There is no lock shared with the other writers.
 - **Rescheduling (step 11), partly built:**
   - `rescheduled` status ([details](rescheduled-status.md)).
-  - The lecturer page's move endpoint, reviewed on 12 November and re-checked after the teammate's update the same day: several findings fixed, opening time, room rules, locking and error text still open, plus a regression ([review](lecturer-reschedule-review.md#re-check-after-the-lecturer-page-update-12-november-2026)).
+  - The lecturer page's move endpoint: reviewed on 12 November, re-checked after the teammate's update, then fixed the same day. It now uses the engine's rules and `lecturer_reschedule_class` (one transaction under the lock), and errors are safe ([fix](lecturer-reschedule-review.md#fix-12-november-2026)). IDs are still not validated.
   - The admin page's Reschedule dialog and its availability/reschedule API ([admin rescheduling API](admin-reschedule-api.md)).
   - The admin page's reschedule database function, fixed on 12 November for the removed room column and the `rescheduled` status.
   - Cancellation and future reservations are not built.
@@ -94,7 +94,7 @@ The single list of what is left (moved here from the removed `task_hayden.md` on
 
 **Step 11: rescheduling, cancellation and reservations**
 - Admin page: **done 12 November 2026.** A Reschedule dialog backed by the availability and reschedule endpoints, which use the engine's rules ([admin rescheduling API](admin-reschedule-api.md)).
-- Fix the lecturer move endpoint's findings by switching it to the same code as the admin endpoints (`scheduling/reschedule.py`), with an ownership check. Re-checked 12 November after the teammate's update: 1 (08:00 instead of 08:30), 3 (room table differs from the config), 4, 7 and 9 are still open, and the real intake code and group size were lost again (`test_lecturer_timetable_shows_the_real_intake_code_and_group_size` fails). See the [review](lecturer-reschedule-review.md):
+- Lecturer move endpoint: **switched to `scheduling/reschedule.py` and `lecturer_reschedule_class` on 12 November 2026** ([fix](lecturer-reschedule-review.md#fix-12-november-2026)), fixing opening hours, room rules, locking, error text and the lost intake code/group size. Still open: validate IDs (finding 9). Apply migration `202611120004` on hosted Supabase. The review's original list was:
   - opening hours
   - the 15-minute gap
   - room type and the auditorium rule
@@ -131,6 +131,7 @@ The single list of what is left (moved here from the removed `task_hayden.md` on
   - `202611120001_class_session_rescheduled_status`
   - `202611120002_save_audit`
   - `202611120003_admin_reschedule_fixes`
+  - `202611120004_lecturer_reschedule` (lecturer moves in one transaction; needed by the lecturer page since 12 November 2026)
   - and `202611110001_admin_timetable` if it is not applied yet
 
 **Settled by the user on 12 November 2026 (no action)**
@@ -642,3 +643,33 @@ Historical discussion; superseded by the implementation record below after the u
   - Frontend: `reschedule.test.js` 6/6, `schedulePreview.test.js` 8/8 (new: a platform `504` gives `SERVER_TIMEOUT`), `roomCalendar.test.js` 7/7, `auth.test.js` 7/7, `lecturer.test.js` 30/30; `npm run build` succeeds.
   - Headless Edge walkthrough on synthetic data, with no reason entered: Save was enabled, the fake database function received `"No reason given"`, and the dialog showed the group size, length, seats and status.
   - Not verified on the live Vercel site or hosted Supabase.
+
+## Lecturer rescheduling fix — 12 November 2026
+
+- Work done on branch `feature-admin-room-timetable`, after committing the production-scheduling work (`8dce393`).
+- **Requirement (user):** "plan and implement the fix on lecturer. Ensure only fix the 5 area you brief to me": the opening time, the room rules, locking, error text, and the lost real intake code and group size.
+- **Plan:** reuse the scheduling engine for checks (the AGENTS.md rule that every move follows the shared validator), and move the write into a database function, as the admin dialog already does. Keep the lecturer API's URLs and response shapes, so the page needs no API change.
+- **Backend:**
+  - `lecturer.py`: the move and the suggestions use `scheduling/reschedule.py` (`load_roster`, `load_target_snapshot`, `explain`, `start_grid`, `free_room_ids`, `run_move_function`). The hard-coded hours, room table, gap and asyncio lock were removed. Reads use the safe shared client from `student.py`, and all errors go through `safe_database_error`. `group_facts` was restored. The router now receives the full settings (`main.py`).
+  - `scheduling/reschedule.py`: those helpers moved to module level; the admin endpoints use them unchanged. `run_move_function` maps database error codes to fixed messages for both callers.
+  - New migration `202611120004_lecturer_reschedule.sql`: the shared `campus_private.move_class_session`, `admin_reschedule_class` calling it, and the new `lecturer_reschedule_class` with an ownership check. Explained in the [migration guide](hosted-migrations.md); the status query has a new column.
+- **Frontend (lecturer page, opening time only):** `time.js` opens at 08:30, the dialog hint says 08:30, and the demo data uses 08:30 and the configured room table.
+- **Details, before and after:** [fix](lecturer-reschedule-review.md#fix-12-november-2026).
+- **Verification:**
+  - New `test_lecturer_reschedule.py`: 22 passed. It covers:
+    - a move as one function call with the user's token;
+    - the optional reason;
+    - an admin acting for a lecturer;
+    - 08:00, 08:29 and a too-late end refused, and 08:30 accepted;
+    - a weekend;
+    - the lab, auditorium and small rooms;
+    - room, gap, lecturer and student clashes;
+    - another lecturer's class;
+    - safe database errors;
+    - suggestions that start at 08:30, use suitable rooms only and offer nothing at a weekend.
+  - `test_auth.py`: 26 passed. The intake-code/group-size regression test passes again, and the on-behalf test now checks that no direct writes are made.
+  - `test_admin_reschedule.py`: 33 passed after the refactor.
+  - PGlite: the new `lecturer-reschedule.test.cjs` passed 14 checks: owner only, history by the lecturer, stale and clash refusals, the admin path, and the internal routine not being callable. `admin-reschedule-fixes.test.cjs` (24) and `admin_timetable.test.cjs` still pass. The status query reported correctly before and after 003 and 004.
+  - Frontend: `lecturer.test.js` 30/30, after updating three tests that encoded 08:00 and "labs only a lab".
+  - Full backend suite: 406 passed, 10 failed, 1 skipped. Only the 10 older loader/preview failures remain; the two lecturer failures from `main` are fixed. Other PGlite suites still pass (`rescheduled-status` 33, `save-audit` 46). Frontend unit tests all pass and `npm run build` succeeds.
+  - Not run against hosted Supabase or on Vercel; the lecturer page was not opened in a browser.

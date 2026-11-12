@@ -128,7 +128,7 @@ Database errors are mapped without provider text:
 - **Gap race:** the engine check (step 3) and the database function (step 4) are separate. The function re-checks overlaps under the lock, but not the 15-minute gap or opening hours. A booking created elsewhere between the two steps could therefore leave a gap shorter than 15 minutes.
 - **Readers:** the availability answer is a snapshot; the save re-checks everything.
 - **Time grid:** the 15-minute start grid is only what the page offers. The `POST` accepts any whole minute.
-- **Older endpoints:** `PUT /api/admin/timetable/{id}` (admin API) still calls the database function directly, without the engine check. The lecturer page's `PATCH /api/lecturers/{id}/sessions/{id}` still uses its own checks ([review](lecturer-reschedule-review.md)). Both should move to this path.
+- **Older endpoints:** `PUT /api/admin/timetable/{id}` (admin API) still calls the database function directly, without the engine check. The lecturer page's `PATCH /api/lecturers/{id}/sessions/{id}` has used this module's helpers since 12 November 2026, with `lecturer_reschedule_class` ([fix](lecturer-reschedule-review.md#fix-12-november-2026)). The older `PUT` should move to this path too.
 - **Notifications:** none are sent; people see the change in their timetables.
 
 ## Verification (12 November 2026)

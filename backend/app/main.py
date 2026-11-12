@@ -74,7 +74,7 @@ def create_app(settings: Settings | None = None, frontend_dist: Path | None = No
     app.include_router(create_admin_router(settings.supabase))
     app.include_router(create_preview_router(settings))
 
-    app.include_router(create_lecturer_router(settings.supabase))
+    app.include_router(create_lecturer_router(settings))  # full settings: the room policy and engine rules
 
     # ---------- Pages (Vue app) ----------
     # Every page except /login needs a session. The checks here cover direct loads

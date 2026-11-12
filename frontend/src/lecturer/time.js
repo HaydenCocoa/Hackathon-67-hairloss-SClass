@@ -36,8 +36,9 @@ export function endTime(startHhmm, minutes) {
   return { hhmm: `${pad(Math.floor(total / 60) % 24)}:${pad(total % 60)}`, nextDay: total >= 1440 }
 }
 
-// When classes can run (the backend enforces the same rules): Monday to Friday, 08:00 to 18:00.
-export const OPEN_TIME = '08:00'
+// When classes can run: Monday to Friday, 08:30 to 18:00 (Config/config.json opening_hours; the backend
+// checks the configured hours and closed dates with the scheduling engine).
+export const OPEN_TIME = '08:30'
 export const CLOSE_TIME = '18:00'
 const toMinutes = (hhmm) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5))
 const fromMinutes = (m) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`

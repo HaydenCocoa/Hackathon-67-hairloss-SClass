@@ -86,6 +86,8 @@ def matches(row, key, expression):
     value = row.get(key)
     if expression.startswith("eq."):
         return str(value) == expression[3:]
+    if expression == "not.is.null":
+        return value is not None
     if expression.startswith("in.("):
         return str(value) in expression[4:-1].replace('"', "").split(",")
     if expression[:3] in ("lt.", "gt."):
