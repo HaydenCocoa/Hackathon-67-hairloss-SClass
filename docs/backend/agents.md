@@ -92,18 +92,19 @@ The separate PostgREST reads are not one transaction snapshot, so any booking wr
 The single list of what is left (moved here from the removed `task_hayden.md` on 12 November 2026). The dated entries below give the background.
 
 **Step 11: rescheduling, cancellation and reservations**
-- Fix the lecturer move endpoint's findings, mainly by reusing the snapshot, `BookingValidator` (`mode="reschedule"`) and `CandidateGenerator` instead of its own checks. See the [review](lecturer-reschedule-review.md):
+- Admin page: **done 12 November 2026.** A Reschedule dialog backed by the availability and reschedule endpoints, which use the engine's rules ([admin rescheduling API](admin-reschedule-api.md)).
+- Fix the lecturer move endpoint's findings by switching it to the same code as the admin endpoints (`scheduling/reschedule.py`), with an ownership check. See the [review](lecturer-reschedule-review.md):
   - opening hours
   - the 15-minute gap
   - room type and the auditorium rule
   - lock and transaction
   - past classes
-- Find and rank other times for one class, keeping every other class fixed.
-- Save a replacement and its history in one transaction, and keep the original if the replacement fails.
+- Rank other times for one class. Free times are now listed per room and day (admin availability endpoint), but they are not ranked yet.
+- Save a replacement and its history in one transaction, keeping the original if the replacement fails: done for admin moves (the database function); still open for the lecturer endpoint.
 - Deliberate cancellation that frees the class's resources.
 - Future reservations (lecturer, students, room) that later generation treats as fixed. Keep "published" separate from "occupies resources".
 - Permission check on every cancel, reschedule and reservation.
-- Admin reschedule function: add opening hours and the 15-minute gap.
+- Admin reschedule database function: add opening hours and the 15-minute gap. The new admin endpoint checks them before calling it, but the older `PUT /api/admin/timetable/{id}` does not.
 
 **Step 12: verify the whole workflow.** No item is started:
 - The acceptance scenarios: cross-intake students, the only suitable lab, no big-enough room, a meeting clash, a reservation preserved, repeated generation, cancelled lessons, freed resources, two requests for one resource, a failed replacement, a stale preview, an unresolved search, a missing placement.
@@ -566,3 +567,45 @@ Historical discussion; superseded by the implementation record below after the u
     - 1440 px and 390 px widths.
   - The first walkthrough found that quick successive checkbox clicks were lost (the panel updated from a stale copy). Fixed: the page now owns the selection, and the panel sends toggle/add/clear events.
   - Not checked against hosted Supabase.
+
+## Admin class rescheduling — 12 November 2026
+
+- Work done on branch `feature-admin-room-timetable`.
+- **Requirement:**
+  - Admin > Timetable gets a blue **Reschedule** button beside **Schedule Class**. A class can be selected in the calendar; double-clicking it, or the button, opens a dialog.
+  - The dialog shows the class (with its ID in a drop-down at the top) and its venue, time, type, intake, group and lecturer.
+  - Venue and time can be changed. Venues not available at the chosen time are greyed out, and the backend is asked again whenever the time changes.
+  - A time at which the chosen venue is not free cannot be picked.
+  - Cancel and Save both ask again when something changed: Cancel says changes are lost; Save says the change is published to everyone involved.
+  - The user allowed backend changes and asked for the new API to be documented.
+- **Backend:**
+  - New `backend/app/scheduling/reschedule.py`:
+    - `GET /api/admin/timetable/{id}/availability` and `POST /api/admin/timetable/{id}/reschedule`, registered in `main.py`.
+    - Both use the target week's snapshot, with the class as the only class to place and its own booking removed, through `BookingValidator` and `CandidateGenerator`, so every compulsory rule applies (including the gap and opening hours). Moves into other weeks and classes without a teaching occurrence work.
+    - The save re-checks the move, then calls `admin_reschedule_class` with the admin's token, which does the lock, re-check, `rescheduled` status and audit row in one transaction.
+  - `observability.py` traces the two new paths (by pattern; the class ID is not logged).
+  - Full contract: [admin rescheduling API](admin-reschedule-api.md).
+- **Frontend:**
+  - `RescheduleClassDialog.vue`:
+    - a class drop-down (this week's upcoming active classes) with the class ID;
+    - the class details;
+    - Monday–Friday day buttons with week arrows (past days disabled);
+    - a 15-minute start-time grid: chosen, current and blocked states, click again to clear;
+    - a venue drop-down with greyed-out options and short reasons;
+    - a required reason;
+    - an inline discard or publish confirmation.
+  - `reschedule.js`: pure helpers and their tests.
+  - `RoomTimetable.vue`: click to select (blue outline), double-click or Enter to open, the blue Reschedule button, a success message, and a reload after a move.
+  - `WeekGrid.vue`: the selection and open events.
+  - `scheduleApi.js`: `getAvailability` and `rescheduleClass`. The re-login redirect now returns to the current page.
+- **Design decisions:**
+  - A reason is required, because `admin_reschedule_class` needs one for the change history.
+  - Only classes that have not started can be moved, matching the lecturer page.
+  - Choosing a new day clears the time, so a room that is busy at the old time can still be chosen. This avoids being stuck when neither the new time nor the new room is free with the other.
+  - Reschedule is disabled with demo data.
+- **Verification:**
+  - New `test_admin_reschedule.py`: 28 passed. Full backend suite: 375 passed, 10 failed, 1 skipped (the same 10 older loader/preview failures).
+  - `reschedule.test.js` 5/5, `schedulePreview.test.js` 8/8, `roomCalendar.test.js` 7/7; `npm run build` succeeds.
+  - Walkthrough in headless Edge against the real backend on synthetic data, with a fake database function that applies the move (no Supabase). It covered select, double-click, a blocked time not selectable, the next week, room greying, publishing with confirmation (the calendar updated), Cancel with Keep editing / Discard, and 1280 px and 390 px widths.
+  - The first run of the walkthrough failed on a QA-server bug (the fake session did not set the access token, so the save correctly returned 401 and redirected to login). The app needed no change.
+  - Not run against hosted Supabase. The save needs migrations 202611110001 and 202611120003 applied.

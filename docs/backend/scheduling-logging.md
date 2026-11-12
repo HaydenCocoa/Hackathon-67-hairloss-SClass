@@ -32,7 +32,7 @@ Select-String -Path .\logs\scheduling.log* -SimpleMatch 'paste-request-id-here'
 
 Look for `snapshot_query_started`, `snapshot_query_completed`, or `snapshot_query_failed`. The `stage` field identifies the fixed part of the loader: requirements, class bookings, occurrence links, meetings, meeting attendees, group memberships, rooms, or lecturers. Successful reads include a row count. A successful preview continues with `snapshot_loaded`, `solver_started`, and `solver_completed`.
 
-The API returns `X-Request-ID` for generation requests, including validation errors, access rejections, and busy responses. CORS exposes that header to approved clients. Structured errors also include `detail.request_id`. The server creates the ID; it does not trust a caller-supplied ID.
+The API returns `X-Request-ID` for generation requests, including validation errors, access rejections, and busy responses. Since 12 November 2026 the admin rescheduling endpoints (`/api/admin/timetable/{id}/availability` and `/reschedule`) are traced the same way; the class ID in the path is not logged. CORS exposes that header to approved clients. Structured errors also include `detail.request_id`. The server creates the ID; it does not trust a caller-supplied ID.
 
 ## Privacy and limits
 

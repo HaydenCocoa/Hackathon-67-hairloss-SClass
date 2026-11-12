@@ -17,6 +17,7 @@ from .database import DatabaseHealth, check_database
 from .observability import SchedulingTraceMiddleware, configure_scheduling_logging
 from .scheduling.calendar import TeachingCalendar
 from .scheduling.preview import create_preview_router
+from .scheduling.reschedule import create_reschedule_router
 from .student import create_student_router
 from .admin import create_admin_router
 from .lecturer import create_lecturer_router
@@ -67,6 +68,8 @@ def create_app(settings: Settings | None = None, frontend_dist: Path | None = No
     app.include_router(create_auth_router())
     # Student Page (Bi Jin): profile + weekly timetable
     app.include_router(create_student_router(settings.supabase))
+    # Admin rescheduling (availability + move), using the scheduling engine's rules.
+    app.include_router(create_reschedule_router(settings))
     # Admin Page (Edward): courses, profiles, intakes and the university timetable
     app.include_router(create_admin_router(settings.supabase))
     app.include_router(create_preview_router(settings))

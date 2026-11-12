@@ -11,8 +11,9 @@ const props = defineProps({
   describe: { type: Function, required: true }, // event -> full text for the tooltip and screen readers
   hourPx: { type: Number, default: 56 },
   dimmed: { type: Boolean, default: false },
+  selectedId: { type: String, default: '' }, // highlighted block (click selects, double-click/Enter opens)
 })
-defineEmits(['select'])
+defineEmits(['select', 'open'])
 
 const hours = computed(() => Array.from({ length: props.layout.lastHour - props.layout.firstHour }, (_, i) => props.layout.firstHour + i))
 const height = computed(() => hours.value.length * props.hourPx)
@@ -44,9 +45,12 @@ function blockStyle(event) {
       >
         <article
           v-for="event in layout.days[day.iso]" :key="event.id || event.occurrence_id" role="listitem" tabindex="0"
-          class="wg-event" :class="[`wg-${toneOf(event.course_type)}`, { 'is-cancelled': event.status === 'cancelled' }]"
+          class="wg-event"
+          :class="[`wg-${toneOf(event.course_type)}`, { 'is-cancelled': event.status === 'cancelled', 'is-selected': selectedId && event.id === selectedId }]"
           :style="blockStyle(event)" :title="describe(event)" :aria-label="describe(event)"
-          @click="$emit('select', event)" @keydown.enter="$emit('select', event)"
+          :aria-current="selectedId && event.id === selectedId ? 'true' : undefined"
+          @click="$emit('select', event)" @dblclick="$emit('open', event)"
+          @keydown.enter.prevent="$emit('open', event)" @keydown.space.prevent="$emit('select', event)"
         >
           <slot name="event" :event="event" />
         </article>
@@ -76,7 +80,7 @@ function blockStyle(event) {
 
 .wg-event {
   position: absolute; box-sizing: border-box; overflow: hidden; display: flex; flex-direction: column; gap: 1px;
-  padding: 4px 6px; border-radius: 6px; border-left: 4px solid; font-size: 12px; line-height: 1.3; cursor: default;
+  padding: 4px 6px; border-radius: 6px; border-left: 4px solid; font-size: 12px; line-height: 1.3; cursor: pointer; user-select: none;
 }
 .wg-event:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
 .wg-event :slotted(*) { flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -86,4 +90,5 @@ function blockStyle(event) {
 .wg-event.wg-yellow { background: #fef7e0; border-color: #fbbc04; }
 .wg-event.wg-red { background: #fce8e6; border-color: #ea4335; }
 .wg-event.is-cancelled { background: #f8f9fa; border-color: #bdc1c6; color: #80868b; text-decoration: line-through; }
+.wg-event.is-selected { z-index: 1; box-shadow: 0 0 0 2px #1a73e8, 0 2px 6px rgba(26, 115, 232, .35); }
 </style>

@@ -8,6 +8,8 @@ import {
   CAMPUS_TZ, addDays, eventLines, formatRange, layoutWeek, mondayOf, roomLabel, sortRooms, todayIso,
   weekDays, weekLabel, weekRange,
 } from './roomCalendar'
+import RescheduleClassDialog from './RescheduleClassDialog.vue'
+import { classLabel, reschedulable } from './reschedule'
 import WeekGrid from './WeekGrid.vue'
 
 const props = defineProps({
@@ -26,6 +28,10 @@ const sessions = ref([])
 const loading = ref(false)
 const error = ref('')
 let latest = 0 // ignore replies to requests that are no longer current
+const selectedId = ref('') // class picked in the calendar
+const dialogOpen = ref(false)
+const dialogClassId = ref('')
+const message = ref('') // result of the last reschedule
 
 const days = computed(() => weekDays(weekStart.value, today.value))
 const label = computed(() => weekLabel(weekStart.value))
@@ -88,6 +94,31 @@ function goToday() {
 }
 
 const lines = (event) => eventLines(event.endMinutes - event.startMinutes)
+const movable = computed(() => reschedulable(sessions.value))
+const selected = computed(() => sessions.value.find((item) => item.id === selectedId.value) || null)
+
+// Click selects a class; double-click (or Enter) and the Reschedule button open the dialog.
+function selectClass(event) {
+  selectedId.value = event.id
+  message.value = ''
+}
+function openReschedule(event) {
+  if (event) selectedId.value = event.id
+  const target = event || selected.value
+  if (target && !movable.value.some((item) => item.id === target.id)) {
+    message.value = `${classLabel(target)} has started or is cancelled, so it cannot be moved.`
+    return
+  }
+  // Without a selection, start with this room's next class (the dialog lists the whole week).
+  dialogClassId.value = target?.id || movable.value.find((item) => item.room_id === roomId.value)?.id || ''
+  message.value = ''
+  dialogOpen.value = true
+}
+function onRescheduled({ session, result, room }) {
+  dialogOpen.value = false
+  message.value = `Rescheduled: ${classLabel({ ...session, starts_at: result.starts_at, ends_at: result.ends_at, room })}. Everyone involved now sees the new time and venue.`
+  load()
+}
 
 function eventLabel(event) {
   const parts = [
@@ -145,7 +176,10 @@ onMounted(load)
     <p v-else-if="loading" class="rt-state" aria-busy="true">Loading the week…</p>
     <p v-else-if="selectedRoom && !classCount" class="rt-state">No classes in {{ selectedRoom.name }} this week.</p>
 
-    <WeekGrid :days="days" :layout="layout" :describe="eventLabel" :dimmed="loading">
+    <WeekGrid
+      :days="days" :layout="layout" :describe="eventLabel" :dimmed="loading" :selected-id="selectedId"
+      @select="selectClass" @open="openReschedule"
+    >
       <template #event="{ event }">
         <strong>{{ event.course_code }}<span v-if="event.status === 'rescheduled'" class="rt-chip">Moved</span></strong>
         <span>{{ formatRange(event.startMinutes, event.endMinutes) }}</span>
@@ -154,10 +188,19 @@ onMounted(load)
       </template>
     </WeekGrid>
 
+    <p v-if="message" class="rt-state rt-done" role="status">{{ message }}</p>
     <div class="rt-actions">
       <a class="rt-schedule" href="/admin/schedule" target="_blank" rel="noopener">Schedule Class</a>
-      <small>Opens the scheduling workspace in a new tab.</small>
+      <button type="button" class="rt-reschedule" :disabled="demo" :title="demo ? 'Not available with demo data' : ''" @click="openReschedule()">
+        Reschedule
+      </button>
+      <small>{{ selected ? `Selected: ${classLabel(selected)}` : 'Select a class, then Reschedule; or double-click a class.' }}</small>
     </div>
+
+    <RescheduleClassDialog
+      :open="dialogOpen" :sessions="sessions" :initial-id="dialogClassId"
+      @close="dialogOpen = false" @saved="onRescheduled"
+    />
   </section>
 </template>
 
@@ -180,7 +223,7 @@ onMounted(load)
 .rt-icon { display: grid; place-items: center; border: 0; background: transparent; width: 36px; height: 36px; padding: 0; border-radius: 50%; }
 .rt-icon svg { width: 22px; height: 22px; fill: #3c4043; }
 .rt-icon:hover { background: var(--grey); }
-button:focus-visible, .rt-schedule:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+button:focus-visible, .rt-schedule:focus-visible, .rt-reschedule:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .rt-legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 0; padding: 0; list-style: none; font-size: 13px; color: var(--muted); }
 .rt-legend li { display: flex; align-items: center; gap: 6px; }
 .rt-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
@@ -196,5 +239,12 @@ button:focus-visible, .rt-schedule:focus-visible { outline: 2px solid var(--blue
   font-weight: 600; text-decoration: none; box-shadow: 0 1px 2px rgba(60, 64, 67, .3);
 }
 .rt-schedule:hover { background: #137333; }
+.rt-reschedule {
+  padding: 11px 22px; border: 0; border-radius: 8px; background: var(--blue); color: #fff; font-weight: 600;
+  box-shadow: 0 1px 2px rgba(60, 64, 67, .3);
+}
+.rt-reschedule:hover:not(:disabled) { background: #1765cc; }
+.rt-reschedule:disabled { opacity: .5; cursor: not-allowed; }
+.rt-done { margin: 14px 0 0; background: #e6f4ea; color: #0d652d; }
 .rt-actions small { color: var(--muted); }
 </style>

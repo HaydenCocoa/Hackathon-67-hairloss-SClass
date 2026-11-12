@@ -57,7 +57,9 @@ Findings 1–5, 8, 10 and 12 go away if the endpoint reuses the scheduling engin
    - give the backend's PATCH an expected start and room, as the admin function already does.
 5. Send the allowed room types (from `scheduling.room_compatibility`) to the page instead of `required_room_type`.
 
-The admin page's reschedule (`admin_reschedule_class`) has the same gaps for opening hours and the 15-minute gap. Room type, the auditorium rule and the `rescheduled` status were fixed on 12 November by [202611120003](../../supabase/migrations/202611120003_admin_reschedule_fixes.sql).
+**Update, 12 November 2026:** steps 1–3 now exist for the admin page as `GET /api/admin/timetable/{id}/availability` and `POST /api/admin/timetable/{id}/reschedule` ([admin rescheduling API](admin-reschedule-api.md)), and step 4 uses `admin_reschedule_class`. The lecturer endpoint can be switched to the same code (with an ownership check).
+
+The admin page's reschedule (`admin_reschedule_class`) has the same gaps for opening hours and the 15-minute gap when it is called directly (the older `PUT /api/admin/timetable/{id}`). Room type, the auditorium rule and the `rescheduled` status were fixed on 12 November by [202611120003](../../supabase/migrations/202611120003_admin_reschedule_fixes.sql).
 
 ## Fixed during this review
 

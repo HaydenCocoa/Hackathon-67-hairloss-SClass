@@ -80,7 +80,7 @@ test('rows are sorted, labelled in campus time, filtered and grouped by day', ()
 })
 
 // ---------- scheduleApi.js against a fake fetch ----------
-globalThis.window = { location: { assign(url) { window.location.assigned = url } } }
+globalThis.window = { location: { pathname: '/admin/schedule', assign(url) { window.location.assigned = url } } }
 const { ScheduleApiError, generatePreview, listIntakes, savePreview } = await import('./scheduleApi.js')
 
 function fakeFetch(status, body, headers = {}) {

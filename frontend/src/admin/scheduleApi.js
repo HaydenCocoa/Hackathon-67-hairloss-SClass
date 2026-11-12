@@ -1,4 +1,5 @@
-// HTTP calls for /admin/schedule. Uses the login session cookie (same origin).
+// HTTP calls for the admin scheduling features (/admin/schedule and the Reschedule dialog).
+// Uses the login session cookie (same origin).
 // Scheduling errors arrive as { detail: { code, message, request_id } }; admin API errors as { detail: "text" }.
 import { generateBody, saveBody } from './schedulePreview.js'
 
@@ -11,7 +12,8 @@ export class ScheduleApiError extends Error {
   }
 }
 
-const LOGIN = `/login?next=${encodeURIComponent('/admin/schedule')}`
+// The session ended: log in again, then come back to this page.
+const loginUrl = () => `/login?next=${encodeURIComponent(window.location.pathname || '/admin')}`
 
 async function call(url, { method = 'GET', body } = {}) {
   let response
@@ -27,7 +29,7 @@ async function call(url, { method = 'GET', body } = {}) {
   }
   const requestId = response.headers?.get('X-Request-ID') || ''
   if (response.status === 401) {
-    window.location.assign(LOGIN) // the session ended: log in again, then come back here
+    window.location.assign(loginUrl())
     throw new ScheduleApiError('Your session has ended. Log in again.', { code: 'AUTH_REQUIRED', status: 401, requestId })
   }
   let data = null
@@ -50,3 +52,13 @@ export const listLecturers = async () => (await call('/api/admin/lecturers')).da
 export const generatePreview = (week, intakeIds) => call('/api/schedules/generate', { method: 'POST', body: generateBody(week, intakeIds) })
 
 export const savePreview = (preview) => call('/api/schedules/save', { method: 'POST', body: saveBody(preview) })
+
+/** Rooms and start times free for moving one class on a campus date; with start (HH:MM), why each room is (not) free. */
+export async function getAvailability(sessionId, date, start) {
+  const query = new URLSearchParams({ date, ...(start ? { start } : {}) })
+  return (await call(`/api/admin/timetable/${encodeURIComponent(sessionId)}/availability?${query}`)).data
+}
+
+/** Move one class (body from reschedule.js moveBody). Checked again on the server, then saved with its history. */
+export const rescheduleClass = (sessionId, body) =>
+  call(`/api/admin/timetable/${encodeURIComponent(sessionId)}/reschedule`, { method: 'POST', body })
