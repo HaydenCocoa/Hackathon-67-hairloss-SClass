@@ -645,6 +645,12 @@ Historical discussion; superseded by the implementation record below after the u
   - Plans: 42, of which 36 are CS(CYB) and 6 SE. Class sessions: 8, all SE.
   - **The CS(CYB) scripts and `seed_students.sql` still use the old codes.** Do not rerun `seed_courses_cyb.sql` or `seed_students.sql`. The other scripts stop or do nothing until their codes are updated.
   - Documentation only; no data changed. Table: [hosted state](cyb-course-seed.md#hosted-database-state--13-november-2026).
+- **Separate Year 2 and Year 3 students (13 November 2026, user request):**
+  - Problem: the renamed CS(CYB) intakes still shared the same 80 sample students.
+  - [supabase/split_cyb_students.sql](../../supabase/split_cyb_students.sql) removes all current members from `APD2F2611CS(CYB)` and `APD3F2611CS(CYB)`; they stay in Year 1.
+  - It adds 80 new single-intake students to each: `TP001001`–`TP001080` and `TP001081`–`TP001160`, 40 per group, with new surnames so no name repeats.
+  - Hosted codes, names and the affected students were checked read-only first.
+  - 19 checks passed locally; to be run by the user. Details: [CS(CYB) course seed](cyb-course-seed.md#separate-students-for-years-2-and-3--13-november-2026).
 - **Assumptions to confirm:** Year 3 module abbreviations are made up. Year 1/2 lecture+lab versus lecture+tutorial is inferred. Both Year 3 electives are included. Semesters are not stored. Details and the Year 3 teaching weeks: [CS(CYB) course seed](cyb-course-seed.md).
 - **Verification:** new `supabase/tests/courses-cyb.test.cjs` passed 39 checks on PGlite, run on both the legacy schema and the schema without the room column. `courses.test.cjs` still passes 20. Not run on hosted Supabase.
 

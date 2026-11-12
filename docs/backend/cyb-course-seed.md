@@ -37,6 +37,38 @@ The user ran the scripts on hosted Supabase: the course seed, the 9-module teach
 
 To use the remove or revert scripts again, replace the three old CYB codes with the 2611 codes first.
 
+## Separate students for Years 2 and 3 — 13 November 2026
+
+**Problem (raised by the user after the rename):** `seed_students.sql` put the same 80 students in all three CS(CYB) intakes, so the three years shared one student list.
+
+**Script:** [supabase/split_cyb_students.sql](../../supabase/split_cyb_students.sql). Test: [supabase/tests/split-cyb-students.test.cjs](../../supabase/tests/split-cyb-students.test.cjs).
+
+- Removes every current member from `APD2F2611CS(CYB)` and `APD3F2611CS(CYB)`. They are not deleted. The shared 80 stay in `APD1F2611CS(CYB)`, which is not touched; neither is `APU1F2611CS(SE)`.
+- Adds 80 new fictional students to each of the two intakes. Each new student belongs to that one intake only.
+
+  | Intake | Codes | Surnames | Ages | Groups |
+  | --- | --- | --- | --- | --- |
+  | `APD2F2611CS(CYB)` | `TP001001`–`TP001080` | Adams, Bell | 19–22 | 40 / 40 |
+  | `APD3F2611CS(CYB)` | `TP001081`–`TP001160` | Cook, Edwards | 20–23 | 40 / 40 |
+
+  Given names are the sample list. The new surnames are not used by the sample, so no name repeats. The codes are outside the sample range `TP000001`–`TP001000`, so rerunning `seed_students.sql` does not change them. No login accounts are created.
+- **Checked on hosted Supabase before writing it (read-only):**
+  - the codes and surnames were unused;
+  - 2F and 3F contained only the 80 shared sample students;
+  - the three CYB students outside that group, two of them linked to logins, are all in Year 1 only, so the script does not affect them.
+- **Stops, changing nothing,** if either intake is missing or has fewer than 2 groups, or if a new code already belongs to someone else. It is atomic, and a rerun changes nothing (it also puts a new student back to a single intake).
+- **Effect on scheduling:** with the 9-module plans, each student now has only their own year's 6 classes a week instead of 18, which makes the week much easier to place. The 15-minute gap and other rules are unchanged.
+- **Verification:** 19 checks passed (PGlite, mocked Supabase Auth) on a copy of the hosted situation. They cover:
+  - 80 students per intake (40 / 40), not shared with another year, with distinct names;
+  - codes, ages and surnames;
+  - exactly one intake per new student;
+  - Year 1, SE and the Year 1 login link unchanged;
+  - a Year 3-only member removed from the intake but not deleted;
+  - the code-clash and missing-intake guards;
+  - reruns.
+
+  The user runs it on hosted Supabase; the assistant did not.
+
 ## Requirement
 
 The user asked for course and intake data for the CS(CYB) cohort, covering the same modules their own intake takes. Year 1 and Year 2 modules come from the user's interim transcripts. Year 3 modules come from the `APD3F2609CS(CYB)` programme schedule. Internship is excluded. No student, grade or attendance data from the transcripts is stored in the seed or in this note.
