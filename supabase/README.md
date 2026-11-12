@@ -80,6 +80,12 @@ Both components of each subject use the same lecturer. Lectures and the tutorial
 
 The script is atomic, uses no temporary tables, and can be rerun while preserving existing course/offering/section UUIDs. Rerunning refreshes the listed course names/durations and the target intake's lecturer and room-type assignments. A missing lecturer or a conflicting duration protected by existing sessions causes rollback. The final query lists all six components for inspection.
 
+## Courses for the CS(CYB) cohort, years 1 to 3
+
+Run [seed_courses_cyb.sql](seed_courses_cyb.sql) as `postgres` in the SQL Editor after `schema.sql` and `seed_lecturers.sql`, normally after `seed_students.sql`. It adds 41 modules for `APD1F2407CS(CYB)` (15), `APD2F2506CS(CYB)` (14, without Internship) and `APD3F2609CS(CYB)` (12). Each module has two 120-minute components that share one lecturer (`LEC004`–`LEC020`). Each component gets an intake offering and a section for every group. That is 82 course rows, 82 offerings and 164 sections with 2 groups.
+
+It works before and after the `required_room_type` removal, can be rerun, and creates no class sessions. Year 3 course codes are placeholders. Assumptions and teaching dates: [CS(CYB) course seed](../docs/backend/cyb-course-seed.md).
+
 ## Sample students and intakes
 
 Run [seed_students.sql](seed_students.sql) after creating or upgrading the schema (including the age migration). It creates or updates 18 intake codes and generates **1,000 unique student identities with 1,480 memberships**, arranged as the twelve cohorts below. Codes remain `TP000001` through `TP001000`, with distinct generated names and integer ages 18 through 25 (125 students per age).
@@ -159,6 +165,7 @@ $env:NODE_PATH = Join-Path (Get-Location).Path '.sql-tools/node_modules'
 node supabase/tests/schema.test.cjs
 node supabase/tests/memberships.test.cjs
 node supabase/tests/courses.test.cjs
+node supabase/tests/courses-cyb.test.cjs
 node supabase/tests/teaching-requirements.test.cjs
 node supabase/tests/room-type-removal.test.cjs
 node supabase/tests/scheduling-snapshot.test.cjs

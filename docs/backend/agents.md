@@ -614,6 +614,26 @@ Historical discussion; superseded by the implementation record below after the u
   - The first run of the walkthrough failed on a QA-server bug (the fake session did not set the access token, so the save correctly returned 401 and redirected to login). The app needed no change.
   - Not run against hosted Supabase. The save needs migrations 202611110001 and 202611120003 applied.
 
+## CS(CYB) course seed, years 1 to 3 — 12 November 2026
+
+- **Requirement:** course and intake data for the CS(CYB) cohort, matching the user's own intake. Years 1 and 2 come from the user's transcripts and Year 3 from the `APD3F2609CS(CYB)` programme schedule. Internship is excluded. No personal or grade data was copied.
+- **Added:** [supabase/seed_courses_cyb.sql](../../supabase/seed_courses_cyb.sql), with 41 modules for `APD1F2407CS(CYB)` (15), `APD2F2506CS(CYB)` (14) and `APD3F2609CS(CYB)` (12). That is 82 course rows, 82 offerings, and sections for every group (164 with 2 groups). All components are 120 minutes, each module has one lecturer from `LEC004`–`LEC020`, and no teaching plans or sessions are created. It works with or without the removed `required_room_type` column.
+- **Course codes (changed the same day at the user's request):** `CS101-*` for Year 1, `CS201-*` for Year 2 and `CS301-*` for Year 3. At the user's request, IN and PYP are not created by this seed. Year 1 links the original `CS101-IN`/`CS101-PYP` courses from `seed_courses.sql` without changing them, so that seed must run first; otherwise this one stops and changes nothing. It creates 78 course rows. Now 53 checks pass, with `seed_courses.sql` run first in both scenarios.
+- **Revert script (same day, user request):** [supabase/revert_courses_cyb.sql](../../supabase/revert_courses_cyb.sql) deletes the cohort's sections, offerings and 78 course rows. It keeps `seed_courses.sql` rows, the intakes and memberships, and any course another intake uses. It stops without deleting if a class session or teaching plan uses a cohort section. With it, the test passes 75 checks. Not run on hosted Supabase.
+- **Teaching plans (same day, user request):**
+  - Scripts: [supabase/seed_teaching_plans_cyb.sql](../../supabase/seed_teaching_plans_cyb.sql) and [supabase/remove_teaching_plans_cyb.sql](../../supabase/remove_teaching_plans_cyb.sql).
+  - User choices: all three intakes in the same weeks, 14 consecutive weeks, 1 lesson a week. The start Monday is the assistant's default, 16 Nov 2026. That gives 164 plans and 2,296 lessons, with no times or rooms.
+  - **Known infeasibility, accepted by the user:** the same 80 sample students are in all three intakes, so each would need 164 h a week. Generate Preview cannot place them all.
+  - Removal switches off the lesson delete protection only inside its own transaction. It stops if a class session is linked to a lesson. Remove the plans before reverting the courses.
+  - 27 new checks passed on the fully migrated schema; related suites still pass. Not run on hosted Supabase.
+  - **Reduced on 13 November 2026** at the user's request ("too much for sample data"); this supersedes the 164-plan version above:
+    - The user chose a small set that can be scheduled: three Semester 1 modules per intake (`CS301-INV/ALG/VAPT`, `CS201-ENTINV/OODJ/SDM`, `CS101-IDB/IN/PYP`), with nine different lecturers. That gives 36 plans and 504 lessons.
+    - The plan script stops if other CS(CYB) modules still have plans. The removal script still covers all 41 modules, so it also clears the old version.
+    - Real solver on a synthetic copy of the week (same 80 students, `seed_rooms.sql` rooms, configured settings): OPTIMAL, 36/36 placed in 91 s, no idle time. The plan test now passes 33 checks. Not run on hosted Supabase.
+  - Details: [CS(CYB) course seed](cyb-course-seed.md#teaching-plans).
+- **Assumptions to confirm:** Year 3 module abbreviations are made up. Year 1/2 lecture+lab versus lecture+tutorial is inferred. Both Year 3 electives are included. Semesters are not stored. Details and the Year 3 teaching weeks: [CS(CYB) course seed](cyb-course-seed.md).
+- **Verification:** new `supabase/tests/courses-cyb.test.cjs` passed 39 checks on PGlite, run on both the legacy schema and the schema without the room column. `courses.test.cjs` still passes 20. Not run on hosted Supabase.
+
 ## Scheduling in production, optional reschedule reason, lecturer re-check — 12 November 2026
 
 - Work done on branch `feature-admin-room-timetable`, after committing the admin rescheduling work and merging `main` (PRs #18 and #20).
