@@ -29,6 +29,8 @@ async function request(path, options = {}) {
     if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
       throw new ApiError(detail.message, detail.conflicts || [])
     }
+    // A plain-text detail (for example from HTTPException(500, "...")) is shown as it is, so the cause is visible.
+    if (typeof detail === 'string' && detail) throw new ApiError(detail)
     throw new ApiError('Please check the details and try again.')
   }
   return body
@@ -53,3 +55,15 @@ export const reschedule = (lecturerId, sessionId, body) =>
     method: 'PATCH',
     body: JSON.stringify(body),
   })
+
+/**
+ * Free time slots near what the lecturer asked for, best first (worked out by the backend from the
+ * timetable: no room, lecturer or student clash; room of the right type and size).
+ * Returns [{ session_date, start_time, end_time, room_id, room_name, building, capacity }].
+ */
+export function suggestSlots(lecturerId, sessionId, { date, time, flexDays = 1, limit = 6 }) {
+  const query = new URLSearchParams({ date, time, flex_days: String(flexDays), limit: String(limit) })
+  return request(
+    `/api/lecturers/${encodeURIComponent(lecturerId)}/sessions/${encodeURIComponent(sessionId)}/suggestions?${query}`,
+  )
+}
