@@ -112,7 +112,8 @@ class SupabaseWriteError(HTTPException):
     """Safe insert failure. Keeps only the HTTP status and an allowlisted Postgres
     error code for classification; never the provider message, details or hint."""
 
-    SAFE_CODES = {"23505", "23503", "23514", "P0001", "42501", "40001", "40P01"}
+    # PGRST204 / 42703: a column is missing (for example the save-audit migration is not applied).
+    SAFE_CODES = {"23505", "23503", "23514", "P0001", "42501", "40001", "40P01", "PGRST204", "42703"}
 
     def __init__(self, table: str, provider_status: int, provider_code: str | None):
         self.provider_status = provider_status
@@ -303,6 +304,8 @@ def create_student_router(settings: SupabaseSettings) -> APIRouter:
                 ("select", "action,reason,old_values,new_values,created_at,class_session_id,"
                            "class_sessions(id,section_id,starts_at,status)"),
                 ("class_session_id", "not.is.null"),
+                # 'create' rows are the save audit (a class was booked), not a change to show students.
+                ("action", "in.(cancel,reschedule)"),
                 ("created_at", f"gte.{since}"),
                 ("order", "created_at.desc"),
                 ("limit", "200"),

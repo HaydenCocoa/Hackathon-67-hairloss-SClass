@@ -1,6 +1,6 @@
 # Student Page (Bi Jin)
 
-Open **http://127.0.0.1:5173/#/student** (or click *Student timetable* in the main menu sidebar).
+Log in as a student at **http://127.0.0.1:5173/login**; students are sent to **/student**. (Old `#/student` links redirect there.)
 
 ## What it does
 
@@ -33,6 +33,6 @@ Try it at http://127.0.0.1:8000/docs. The backend uses the server key from `.env
 
 ## Notes for the team
 
-- **Login (Hayden):** until login exists, the student types their code (stored in `localStorage`). When login is ready, render `<StudentPage :student-code="signedInCode" />`. The backend should then take the student from the session instead of the URL, so students can only view their own timetable (see the TODO in `student.py`).
+- **Login (done 12 November 2026):** the backend checks the login session, so a student can only read their own profile and timetable; another student's code returns 403 (admins may read any). The page still has its own code box and "Switch" button, which can be removed in favour of `<StudentPage :student-code="signedInCode" />`. See [login](../../../docs/backend/login.md).
 - **Reschedule/cancel (Ting Ju / Edward):** when writing `schedule_changes`, put `starts_at` and `room_id` in `old_values` / `new_values` (e.g. `{"starts_at": "...", "room_id": "..."}`). The Student Page reads these keys to show "was → now". Set `class_sessions.status = 'cancelled'` for cancellations.
 - Request-a-meeting (optional feature) is not built yet: `meeting_sessions.status` only allows `scheduled`/`cancelled`, so a request/approval status or table is needed first.

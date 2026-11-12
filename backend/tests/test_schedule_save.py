@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from backend.app.main import create_app
 from backend.app.scheduling import preview
-from backend.tests.test_schedule_preview import BASE, WEEK, as_admin, client_for, traces  # noqa: F401 (fixture)
+from backend.tests.test_schedule_preview import ADMIN, BASE, WEEK, as_admin, client_for, traces  # noqa: F401 (fixture)
 from backend.tests.test_scheduling_loader import provider, sql_payload, uid  # noqa: F401 (fixtures)
 
 SAVE = "/api/schedules/save"
@@ -56,8 +56,12 @@ def test_save_writes_whole_preview_in_one_insert_and_retry_is_rejected(provider)
         row = write["rows"][0]
         placement = data["placements"][0]
         # Only booking columns are written; section comes from the database, not the client.
-        assert set(row) == {"occurrence_id", "section_id", "room_id", "starts_at", "status"}
+        assert set(row) == {"occurrence_id", "section_id", "room_id", "starts_at", "status", "created_by"}
         assert row["status"] == "scheduled" and row["section_id"] == placement["section_id"]
+        # Save audit: every row names the saving admin's Supabase user; the database trigger
+        # turns it into a schedule_changes 'create' row in the same statement.
+        assert all(item["created_by"] == ADMIN.auth_user_id for item in write["rows"])
+        assert saved["saved_by"] == ADMIN.name and ADMIN.auth_user_id not in response.text
         assert row["room_id"] == placement["room_id"]
 
         # The saved class is now a fixed booking: nothing left to schedule.
@@ -152,6 +156,9 @@ def test_invalid_save_request_is_rejected_before_any_database_call(provider, edi
     (403, {"code": "42501", "details": "PRIVATE-PROVIDER-TEXT"}, 502, "DATABASE_PERMISSION_DENIED"),
     (500, "<html>PRIVATE-PROVIDER-TEXT</html>", 502, "DATABASE_UNAVAILABLE"),
     (201, [], 502, "SAVE_UNCONFIRMED"),
+    # The save-audit migration is not applied: PostgREST does not know created_by.
+    (400, {"code": "PGRST204", "message": "PRIVATE-PROVIDER-TEXT"}, 503, "AUDIT_NOT_INSTALLED"),
+    (400, {"code": "42703", "message": "PRIVATE-PROVIDER-TEXT"}, 503, "AUDIT_NOT_INSTALLED"),
 ])
 def test_database_write_errors_are_safe_and_release_the_slot(provider, traces, status, body, http, code):  # noqa: F811
     settings, state = provider

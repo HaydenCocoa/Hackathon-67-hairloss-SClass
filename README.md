@@ -54,6 +54,16 @@ npm run dev
 
 Open **http://127.0.0.1:5173**. You are sent to **/login**; log in with a Supabase Auth email and password that is linked to an admin, lecturer or student record (see [login and account setup](docs/backend/login.md)). Students go to **/student**, lecturers to **/lecturer** and administrators to **/admin**. FastAPI's interactive documentation is at **/docs**.
 
+## Admin workspace
+
+Log in as an administrator and open **http://127.0.0.1:5173/admin**. Choose **Try local demo** to try courses, students, lecturers, intakes and timetable actions in memory. Demo data is discarded when the page reloads, and the demo does not check scheduling conflicts.
+
+For the database-backed workspace, choose **Connect**. The admin API uses your login session, so the access-token box can stay blank; a pasted Supabase access token of an account linked to `admins.auth_user_id` still works. The admin API checks admin membership on each request. Student and lecturer CRUD changes profiles only; it does not create or delete Supabase Auth accounts.
+
+To enable timetable editing and removal of cancelled classes, apply [the admin timetable migration](supabase/migrations/202611110001_admin_timetable.sql) once, then [its fixes](supabase/migrations/202611120003_admin_reschedule_fixes.sql) after the [rescheduled status migration](supabase/migrations/202611120001_class_session_rescheduled_status.sql). They are not applied automatically. Rescheduling checks the room's type (the course-to-room policy in `Config/config.json`), capacity and the auditorium rule, plus overlapping classes and meetings, then marks the class `rescheduled` and records the change in the same transaction. It does not yet check opening hours or the 15-minute gap. Removing a cancelled class hides it from the timetable while retaining the class and its history.
+
+The migration uses the existing configuration advisory lock for timetable and meeting writes. Scheduling operations introduced later should use the same lock and conflict rules. A deployed database also needs the migration before these timetable actions can work.
+
 ## Serve the built app through FastAPI
 
 ```powershell
@@ -76,11 +86,11 @@ Open **http://127.0.0.1:8000**. FastAPI serves the compiled Vue app and API from
 
 The `scheduling` section of `Config/config.json` defines the timezone, weekday opening hours, and optional `closed_dates` (`YYYY-MM-DD`). Initial hours are Monday–Friday, **08:30–18:00**, in `Asia/Kuala_Lumpur`. Omitted weekdays are closed; change or add weekday entries to configure teaching days and different daily hours. Opening and closing times use 24-hour `HH:MM` format, with opening earlier than closing on the same day.
 
-Classes may start at any time, with no fixed start-time interval or mandatory breaks. The full positive-duration class must fit inside one opening window. For example, 09:17–10:47 is permitted, while 17:00–18:30 is outside the initial hours. An explicit closed date overrides weekday opening hours; no public holidays are imported automatically.
+Classes may start at any whole minute, with no fixed start-time interval. The full positive-duration class must fit inside one opening window. Any two bookings (classes or meetings) that share a room, lecturer or student must be at least `min_gap_minutes` apart (15 minutes). For example, 09:17–10:47 is permitted, while 17:00–18:30 is outside the initial hours. An explicit closed date overrides weekday opening hours; no public holidays are imported automatically.
 
 `TeachingCalendar` in `backend/app/scheduling/calendar.py` accepts timezone-aware start/end timestamps and checks calendar eligibility. FastAPI initializes it as `app.state.teaching_calendar`. It does not yet check resource conflicts or generate schedules. Install the updated backend requirements for the timezone data needed on Windows.
 
-See [backend progress and decisions](docs/backend/agents.md), [calendar details](docs/backend/scheduling-calendar.md), and the [development checklist](task_hayden.md).
+See [backend progress, decisions and remaining work](docs/backend/agents.md) and [calendar details](docs/backend/scheduling-calendar.md).
 
 ## Repeating teaching requirements
 
@@ -114,15 +124,15 @@ Generate one occurrence or every pending occurrence from an existing snapshot. R
 
 `solve_weekly_schedule(snapshot, settings.scheduling.solver)` uses OR-Tools CP-SAT to assign a room and start to every pending lesson together. It enforces clashes for shared rooms, lecturers, and students across intakes, preserves fixed bookings, and verifies the complete result before returning it. Time is encoded in exact relative microseconds, without preset teaching slots.
 
-Install updated backend requirements for OR-Tools. Configure `scheduling.solver` for search time (default 10 seconds), worker count (default 1), and random seed (default 0). Results distinguish complete solutions, proven infeasibility, unresolved search, invalid models, and an empty pending week. No partial timetable is returned as complete.
+Install updated backend requirements for OR-Tools. Configure `scheduling.solver` for search time (120 seconds in `Config/config.json` since 12 November 2026; 10 seconds when unset), worker count (default 1), and random seed (default 0). Results distinguish complete solutions, proven infeasibility, unresolved search, invalid models, and an empty pending week. No partial timetable is returned as complete.
 
-This engine produces a feasibility draft. Quality objectives are postponed; step 9 exposes local preview generation and step 10 saves a reviewed preview (local development; login-based authorization is deferred). No new database migration is required for these computation/API steps. See [solver setup, usage, statuses, and verification](docs/backend/cp-sat-scheduling.md).
+With the preferences in `scheduling.quality` (student waiting time, lecturer gaps, room fit), the engine first finds a valid timetable and then improves it; compulsory rules always win. See [timetable quality](docs/backend/timetable-quality.md). Step 9 exposes local preview generation and step 10 saves a reviewed preview; both need an admin login. See [solver setup, usage, statuses, and verification](docs/backend/cp-sat-scheduling.md).
 
 ## Scheduling test page
 
-With FastAPI running, log in as an administrator and open **http://127.0.0.1:8000/admin/development/scheduling-test-hayden** (also linked from `/admin`). Select a Monday, enter the intake's database UUID and optionally a group number. Generate all pending classes for that intake, or only that group. The page sends a request to the same API and displays proposed classes in campus-local time, readable course/room labels, selected scope, solver outcome, diagnostics, and raw JSON. Other intakes' existing bookings remain fixed constraints. It works without building Vue.
+With FastAPI running, log in as an administrator and open **http://127.0.0.1:8000/admin/development/scheduling-test-hayden**. Select a Monday, enter the intake's database UUID and optionally a group number. Generate all pending classes for that intake, or only that group. The page sends a request to the same API and displays proposed classes in campus-local time, readable course/room labels, selected scope, solver outcome, diagnostics, and raw JSON. Other intakes' existing bookings remain fixed constraints. It works without building Vue.
 
-This is a local-development admin tool. Generating a preview saves nothing, and quality optimization is disabled. Previews are not stored: leaving or reloading the page discards them. After review, **Save timetable…** opens a two-step confirmation (summary, then a tick box before **Confirm save**). Saving rechecks the week against the database, rejects a stale or edited preview, and writes all classes to `class_sessions` in one insert. Saved classes are visible to students and lecturers immediately, and the page has no undo. The API/page require `app.environment=development` and a direct localhost connection; remote/proxy access is rejected until authenticated access is implemented. Live use requires configured Supabase access, the teaching-requirement migration/views, and source data. See [API contract, setup, and test evidence](docs/backend/schedule-preview-api.md) and [timetable saving](docs/backend/timetable-saving.md).
+This is a local-development admin tool. Generating a preview saves nothing; the page shows the quality measurements of each complete preview. Previews are not stored: leaving or reloading the page discards them. After review, **Save timetable…** opens a two-step confirmation (summary, then a tick box before **Confirm save**). Saving rechecks the week against the database, rejects a stale or edited preview, and writes all classes to `class_sessions` in one insert. Saved classes are visible to students and lecturers immediately, and the page has no undo. The API/page require an admin login, `app.environment=development` and a direct localhost connection; remote/proxy access is rejected. Live use requires configured Supabase access, the teaching-requirement migration/views, and source data. See [API contract, setup, and test evidence](docs/backend/schedule-preview-api.md) and [timetable saving](docs/backend/timetable-saving.md).
 
 Scheduling requests now have a displayed `X-Request-ID` and safe JSON traces in the backend terminal and ignored `logs/scheduling.log`. Restart the backend to load code changes, then watch with `Get-Content .\logs\scheduling.log -Tail 50 -Wait`. Direct backend database reads record the stage that succeeded or failed; see [scheduling logging and database-read diagnosis](docs/backend/scheduling-logging.md).
 
@@ -141,7 +151,7 @@ Scheduling requests now have a displayed `X-Request-ID` and safe JSON traces in 
 | `GET /docs` | Interactive OpenAPI reference |
 | `GET /openapi.json` | Generated, reusable API contract |
 
-Database health results include `status`, a safe `message`, UTC `checked_at`, and `latency_ms` (populated on success). Missing credentials, rejected access, missing table, upstream failure, timeout and invalid responses have distinct safe messages. A successful health check verifies a read via the Supabase Data API. Scheduling previews and saving expose the existing engine through guarded development endpoints; administrator authentication, save auditing, and preference persistence remain future work.
+Database health results include `status`, a safe `message`, UTC `checked_at`, and `latency_ms` (populated on success). Missing credentials, rejected access, missing table, upstream failure, timeout and invalid responses have distinct safe messages. A successful health check verifies a read via the Supabase Data API, rather than just reaching its HTTP server. Scheduling previews and saving are admin-only development endpoints; saves record the admin who saved ([save audit](docs/backend/save-audit.md)). The admin workspace (`/api/admin/*`) uses the login session or a pasted Supabase access token. Preference persistence is not implemented.
 
 ## Verify
 

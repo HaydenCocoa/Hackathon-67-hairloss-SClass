@@ -91,7 +91,8 @@ def test_busy_end_at_opening_and_busy_start_at_closing_use_half_open_intervals(s
     early = booking(id=uid(80), room_id=uid(1), start=start.isoformat(), duration=90)
     late = booking(id=uid(81), room_id=uid(1), start="2026-11-09T18:00:00+08:00")
     snapshot = snapshot.model_copy(update={"class_bookings": (early, late)})
-    expected = instant("2026-11-09T08:30:00+08:00") + timedelta(microseconds=microseconds)
+    # A booking ending 1 microsecond after opening pushes the first whole-minute start to 08:31.
+    expected = instant("2026-11-09T08:30:00+08:00") + timedelta(minutes=1 if microseconds else 0)
     assert ranges_for(generate(snapshot)) == [(expected, instant("2026-11-09T16:30:00+08:00"))]
 
 
@@ -193,7 +194,8 @@ def test_exhaustive_boundary_and_sample_agreement_with_single_booking_validator(
         points.update([item.starts_at - duration, item.starts_at - duration + delta, item.ends_at - delta, item.ends_at])
     for room in snapshot.rooms:
         for point in sorted(points):
-            represented = any(item.room_id == room.id and item.contains(point) for item in result.ranges)
+            whole_minute = not (point.second or point.microsecond)
+            represented = whole_minute and any(item.room_id == room.id and item.contains(point) for item in result.ranges)
             checked = validator.validate(BookingProposal(occurrence_id=uid(100), room_id=room.id, starts_at=point))
             assert represented == checked.valid, (room.id, point, checked.reason_codes)
 

@@ -6,6 +6,8 @@ Status: complete and verified locally. No new migration or hosted database chang
 
 ## Design and decisions
 
+**Changed 12 November 2026 (step 8, [timetable quality](timetable-quality.md)):** starts are whole minutes, a compulsory 15-minute gap separates bookings that share a room, lecturer or student, and auditoriums are used only when no other permitted room can seat the class. Older statements below about microsecond precision, no buffers or adjacent bookings are superseded. Candidate ranges are narrowed to whole-minute starts, and fixed blockers are widened by the gap.
+
 The user requested step 6 after completing standalone validation. Candidate generation must preserve unrestricted starts, exact class duration, configured course-to-room policy, and all fixed resource conflicts.
 
 Return room-specific closed start-time ranges, not a discretized list of preset slots. A two-hour class with uninterrupted availability from 08:30 to 12:00 can start anywhere in `[08:30, 10:00]`, including the endpoints. Times retain Python datetime's microsecond precision. A free interval exactly as long as the class yields a single valid start with equal earliest/latest values.

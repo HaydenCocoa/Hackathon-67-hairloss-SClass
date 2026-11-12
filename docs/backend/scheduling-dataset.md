@@ -51,4 +51,4 @@ Verification for this change consists of checking documentation links and `git d
 
 Step 4 implements the scheduling-data loader: read the selected week's demand, resolve lecturers and actual student rosters, load room inventory and existing bookings, and produce validated input for later placement and solver work. It has not been implemented as part of this step 3 update.
 
-References: [backend record](agents.md), [weekly teaching plans](weekly-teaching-plans.md), [database setup and seeds](../../supabase/README.md), [development checklist](../../task_hayden.md).
+References: [backend record](agents.md), [weekly teaching plans](weekly-teaching-plans.md), [database setup and seeds](../../supabase/README.md).
