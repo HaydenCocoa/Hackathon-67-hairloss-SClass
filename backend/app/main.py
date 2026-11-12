@@ -18,11 +18,8 @@ from .observability import SchedulingTraceMiddleware, configure_scheduling_loggi
 from .scheduling.calendar import TeachingCalendar
 from .scheduling.preview import create_preview_router
 from .student import create_student_router
-Admin
 from .admin import create_admin_router
-=======
 from .lecturer import create_lecturer_router
- main
 
 
 def create_app(settings: Settings | None = None, frontend_dist: Path | None = None) -> FastAPI:
@@ -46,14 +43,10 @@ def create_app(settings: Settings | None = None, frontend_dist: Path | None = No
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.server.cors_origins,
- Admin
-        allow_methods=["GET", "POST", "PUT", "DELETE"],
+        # PUT/DELETE + Authorization: admin page; PATCH: lecturer reschedule.
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["Accept", "Content-Type", "Authorization"],
-
-        allow_methods=["GET", "POST"],
-        allow_headers=["Accept", "Content-Type"],
         expose_headers=["X-Request-ID"],
- main
     )
 
     @app.get("/api/health")
@@ -74,11 +67,9 @@ def create_app(settings: Settings | None = None, frontend_dist: Path | None = No
     app.include_router(create_auth_router())
     # Student Page (Bi Jin): profile + weekly timetable
     app.include_router(create_student_router(settings.supabase))
- Admin
+    # Admin Page (Edward): courses, profiles, intakes and the university timetable
     app.include_router(create_admin_router(settings.supabase))
-
     app.include_router(create_preview_router(settings))
- main
 
     app.include_router(create_lecturer_router(settings.supabase))
 

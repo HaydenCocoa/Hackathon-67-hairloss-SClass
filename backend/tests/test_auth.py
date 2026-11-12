@@ -36,8 +36,12 @@ TABLES = {
                   {"id": uid(204), "full_name": "Bo Both", "lecturer_code": "LEC004", "auth_user_id": uid(4)}],
     "students": [{"id": uid(301), "full_name": "Sam Student", "student_code": "TP000001", "auth_user_id": uid(3),
                   "student_intakes": []}],
-    "class_session_details": [{"id": uid(401), "lecturer_id": uid(202), "status": "scheduled"},
-                              {"id": uid(402), "lecturer_id": uid(202), "status": "cancelled"}],
+    "class_session_details": [
+        {"id": uid(401), "lecturer_id": uid(202), "status": "scheduled", "starts_at": "2026-11-25T02:00:00+00:00",
+         "room_id": uid(9), "section_id": uid(501), "intake_id": uid(601), "group_number": 1, "duration_minutes": 90},
+        {"id": uid(402), "lecturer_id": uid(202), "status": "cancelled", "starts_at": "2026-11-25T05:00:00+00:00",
+         "room_id": uid(9), "section_id": uid(501), "intake_id": uid(601), "group_number": 1, "duration_minutes": 90}],
+    "rooms": [{"id": uid(9), "name": "R9", "building": "B", "capacity": 40, "room_type": "classroom", "is_active": True}],
     "class_sessions": [],
 }
 
@@ -66,7 +70,8 @@ def supabase(monkeypatch):
         def do_POST(self):
             parsed = urlsplit(self.path)
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
-            state["calls"].append({"method": "POST", "path": parsed.path, "body": body})
+            state["calls"].append({"method": "POST", "path": parsed.path, "body": body,
+                                   "authorization": self.headers.get("Authorization")})
             grant = parse_qs(parsed.query).get("grant_type", [None])[0]
             if parsed.path == "/auth/v1/token" and grant == "password":
                 user_id = ACCOUNTS.get(body.get("email"))
@@ -82,6 +87,10 @@ def supabase(monkeypatch):
                 token = self.headers.get("Authorization", "").removeprefix("Bearer ")
                 state["access"].pop(token, None)
                 return self.reply(204, {})
+            if parsed.path == "/rest/v1/schedule_changes":
+                return self.reply(201, [body])
+            if parsed.path.startswith("/rest/v1/rpc/"):
+                return self.reply(200, None)
             self.reply(404, {})
 
         def do_PATCH(self):
@@ -108,8 +117,11 @@ def supabase(monkeypatch):
                 if key == "action" and values[0].startswith("in.("):
                     rows = [row for row in rows if row.get("action") in values[0][4:-1].split(",")]
                 elif not values[0].startswith(("gte.", "lt.", "in.", "not.")):
-                    rows = [row for row in rows if str(row.get(key)) == expected]
-            self.reply(200, rows)
+                    # JSON-style comparison, so is_active=eq.true matches a Python True.
+                    rows = [row for row in rows if json.dumps(row.get(key)).strip('"') == expected]
+            offset = int(params.get("offset", ["0"])[0])
+            limit = int(params.get("limit", [str(len(rows))])[0])
+            self.reply(200, rows[offset:offset + limit])
 
         def log_message(self, *_):
             pass
@@ -314,6 +326,31 @@ def test_admin_can_read_any_record_and_reschedule_on_behalf(supabase, frontend):
         assert c.patch(f"/api/lecturers/{uid(202)}/sessions/{uid(402)}", json=move).status_code == 409
     patches = [call for call in state["calls"] if call["method"] == "PATCH"]
     assert len(patches) == 1 and patches[0]["body"]["status"] == "rescheduled"
+    # The move is logged as made by the admin's Supabase user.
+    logs = [call["body"] for call in state["calls"] if call["path"] == "/rest/v1/schedule_changes"]
+    assert len(logs) == 1 and logs[0]["action"] == "reschedule" and logs[0]["changed_by"] == uid(1)
+
+
+def test_admin_api_accepts_the_login_session(supabase, frontend):
+    """The admin page works for a logged-in admin without pasting a Supabase token."""
+    settings, state = supabase
+    with client(settings, frontend) as c:
+        assert c.get("/api/admin/timetable/rooms").status_code == 401
+        login(c, "student@example.test")
+        assert c.get("/api/admin/timetable/rooms").status_code == 403
+        c.post("/api/auth/logout")
+        login(c, "admin@example.test")
+        rooms = c.get("/api/admin/timetable/rooms")
+        assert rooms.status_code == 200 and rooms.json()[0]["id"] == uid(9)
+        # An empty "Bearer " (blank token box on the page) falls back to the session too.
+        assert c.get("/api/admin/courses", headers={"Authorization": "Bearer "}).status_code == 200
+        access = c.cookies.get(ACCESS_COOKIE)
+        move = {"expected_start": "2026-11-25T02:00:00Z", "expected_room": uid(9), "new_start": "2026-11-25T04:00:00Z",
+                "new_room": uid(9), "reason": "Clash"}
+        assert c.put(f"/api/admin/timetable/{uid(401)}", json=move).status_code == 200
+    rpc = [call for call in state["calls"] if call["path"] == "/rest/v1/rpc/admin_reschedule_class"]
+    # The database function runs as the logged-in admin (auth.uid()), not with the server key.
+    assert len(rpc) == 1 and rpc[0]["authorization"] == f"Bearer {access}"
 
 
 def test_scheduling_page_and_apis_require_an_admin(supabase, frontend):
