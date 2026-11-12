@@ -6,6 +6,8 @@ Status: complete and verified locally. No new migration or hosted database chang
 
 ## Accepted rules and design
 
+**Changed 12 November 2026 (step 8, [timetable quality](timetable-quality.md)):** starts are whole minutes, a compulsory 15-minute gap separates bookings that share a room, lecturer or student, and auditoriums are used only when no other permitted room can seat the class. Older statements below about microsecond precision, no buffers or adjacent bookings are superseded.
+
 The user confirmed the initial system-owned room policy during this task:
 
 | Teaching type | Allowed room types |
@@ -71,7 +73,9 @@ Input models reject malformed UUIDs, timezone-naive starts, unknown modes, extra
 | `INVALID_START_TIME`, `OUTSIDE_HORIZON`, `OUTSIDE_TEACHING_HOURS` | Duration cannot be represented, is outside the loaded week, or does not fit one opening window |
 | `ROOM_NOT_FOUND`, `ROOM_INACTIVE`, `ROOM_TOO_SMALL` | Invalid room or insufficient seats for the unique roster |
 | `ROOM_POLICY_UNDEFINED`, `ROOM_TYPE_MISMATCH` | Missing compatibility rule or unsuitable actual room type |
-| `LECTURER_CONFLICT`, `STUDENT_CONFLICT`, `ROOM_CONFLICT` | Overlapping fixed class/reservation or meeting |
+| `LECTURER_CONFLICT`, `STUDENT_CONFLICT`, `ROOM_CONFLICT` | Overlapping fixed class/reservation or meeting, or one closer than `min_gap_minutes` (15) |
+| `START_NOT_WHOLE_MINUTE` | Start has seconds (since 12 November 2026) |
+| `ROOM_RESERVED_FOR_LARGE_CLASSES` | An auditorium was proposed although another active, permitted room can seat the class (since 12 November 2026) |
 
 Room and conflict checks collect applicable reasons together. Lifecycle/horizon failures return early because this snapshot cannot safely validate that operation. Conflict issues identify booking kind/UUID and student-conflict count where relevant; no student UUID list is returned in the result.
 

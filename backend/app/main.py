@@ -18,6 +18,7 @@ from .observability import SchedulingTraceMiddleware, configure_scheduling_loggi
 from .scheduling.calendar import TeachingCalendar
 from .scheduling.preview import create_preview_router
 from .student import create_student_router
+from .admin import create_admin_router
 from .lecturer import create_lecturer_router
 
 
@@ -42,8 +43,9 @@ def create_app(settings: Settings | None = None, frontend_dist: Path | None = No
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.server.cors_origins,
-        allow_methods=["GET", "POST"],
-        allow_headers=["Accept", "Content-Type"],
+        # PUT/DELETE + Authorization: admin page; PATCH: lecturer reschedule.
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+        allow_headers=["Accept", "Content-Type", "Authorization"],
         expose_headers=["X-Request-ID"],
     )
 
@@ -65,6 +67,8 @@ def create_app(settings: Settings | None = None, frontend_dist: Path | None = No
     app.include_router(create_auth_router())
     # Student Page (Bi Jin): profile + weekly timetable
     app.include_router(create_student_router(settings.supabase))
+    # Admin Page (Edward): courses, profiles, intakes and the university timetable
+    app.include_router(create_admin_router(settings.supabase))
     app.include_router(create_preview_router(settings))
 
     app.include_router(create_lecturer_router(settings.supabase))
@@ -104,7 +108,7 @@ def create_app(settings: Settings | None = None, frontend_dist: Path | None = No
             return index_file()
         app.get(path, include_in_schema=False)(page)
 
-    for role, path in (("student", "/student"), ("lecturer", "/lecturer"), ("admin", "/admin")):
+    for role, path in (("student", "/student"), ("lecturer", "/lecturer"), ("admin", "/admin"), ("admin", "/admin/schedule")):
         role_page(path, role)
 
     if (frontend_dist / "assets").is_dir():

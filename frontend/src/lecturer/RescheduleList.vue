@@ -14,7 +14,7 @@ defineEmits(['pick', 'retry'])
 <template>
   <section id="lc-panel-reschedule" role="tabpanel" aria-labelledby="lc-tab-reschedule">
     <h2 class="lc-title">Upcoming classes</h2>
-    <p class="lc-sub">Choose a class to move to a new date, start time or room. The end time follows the course length.</p>
+    <p class="lc-sub">Pick a class, tell us when you would like to hold it instead, and choose from the free times we suggest.</p>
 
     <div v-if="loading" class="lc-state"><span class="lc-spinner" aria-hidden="true"></span> Loading classes…</div>
     <p v-else-if="error" class="lc-state lc-state-error" role="alert">

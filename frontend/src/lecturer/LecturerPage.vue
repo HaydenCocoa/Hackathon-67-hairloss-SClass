@@ -3,8 +3,9 @@
 // Opened from the main menu at #/lecturer (see src/App.vue).
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import './lecturer.css'
-import { getTimetable, listLecturers, listRooms } from './lecturerApi'
-import { addDays, mondayOf, todayIso, weekDays, weekLabel } from './time'
+import { DEMO, api } from './dataSource'
+import { bySlot } from './session'
+import { addDays, formatTime, longDate, mondayOf, todayIso, weekDays, weekLabel } from './time'
 import LecturerTimetable from './LecturerTimetable.vue'
 import RescheduleDialog from './RescheduleDialog.vue'
 import RescheduleList from './RescheduleList.vue'
@@ -26,9 +27,6 @@ const errorWeek = ref('')
 const upcoming = ref([])
 const loadingUpcoming = ref(false)
 const errorUpcoming = ref('')
-
-const rooms = ref([])
-const roomsError = ref('')
 
 const editing = ref(null) // the class open in the reschedule dialog
 const toast = ref('')
@@ -57,13 +55,9 @@ function showToast(text) {
 }
 
 async function loadLecturers() {
-  lecturers.value = [
-    { id: '3f552573-e5d9-4900-8213-b07fbef13c68', name: 'Ahmad Hakim' }
-  ];
-  lecturerId.value = '3f552573-e5d9-4900-8213-b07fbef13c68';
-    
+  lecturersError.value = ''
   try {
-    lecturers.value = await listLecturers()
+    lecturers.value = await api.listLecturers()
     let saved = ''
     try {
       saved = localStorage.getItem('lecturerId') || ''
@@ -78,15 +72,6 @@ async function loadLecturers() {
   }
 }
 
-async function loadRooms() {
-  roomsError.value = ''
-  try {
-    rooms.value = await listRooms()
-  } catch (e) {
-    roomsError.value = e.message
-  }
-}
-
 async function loadWeek() {
   if (!lecturerId.value) return
   const id = lecturerId.value
@@ -94,8 +79,8 @@ async function loadWeek() {
   loadingWeek.value = true
   errorWeek.value = ''
   try {
-    const rows = await getTimetable(id, { start, end: addDays(start, 6) })
-    if (id === lecturerId.value && start === weekStart.value) weekSessions.value = rows // ignore stale replies
+    const rows = await api.getTimetable(id, { start, end: addDays(start, 6) })
+    if (id === lecturerId.value && start === weekStart.value) weekSessions.value = [...rows].sort(bySlot) // ignore stale replies
   } catch (e) {
     errorWeek.value = e.message
   } finally {
@@ -109,8 +94,8 @@ async function loadUpcoming() {
   loadingUpcoming.value = true
   errorUpcoming.value = ''
   try {
-    const rows = await getTimetable(id, { start: today.value })
-    if (id === lecturerId.value) upcoming.value = rows.filter((s) => s.can_reschedule)
+    const rows = await api.getTimetable(id, { start: today.value })
+    if (id === lecturerId.value) upcoming.value = rows.filter((s) => s.can_reschedule).sort(bySlot)
   } catch (e) {
     errorUpcoming.value = e.message
   } finally {
@@ -123,8 +108,8 @@ function goToday() {
   weekStart.value = mondayOf(today.value)
 }
 
-async function onSaved() {
-  showToast('Class rescheduled')
+async function onSaved(slot) {
+  showToast(`Class moved to ${longDate(slot.session_date)}, ${formatTime(slot.start_time)}`)
   await Promise.all([loadWeek(), loadUpcoming()])
 }
 
@@ -142,10 +127,7 @@ watch(lecturerId, (id) => {
 })
 watch(weekStart, loadWeek)
 
-onMounted(() => {
-  loadLecturers()
-  loadRooms()
-})
+onMounted(loadLecturers)
 onBeforeUnmount(() => clearTimeout(toastTimer))
 </script>
 
@@ -153,12 +135,12 @@ onBeforeUnmount(() => clearTimeout(toastTimer))
   <div class="lecturer">
     <header class="lc-topbar">
       <div class="lc-brand">
-        <a class="lc-back" href="#main">← Main menu</a>
         <span class="lc-wordmark">
           <span class="lc-sr">{{ props.appName }}</span>
           <span v-for="(ch, i) in [...props.appName]" :key="i" :class="'lc-c' + (i % 4)" aria-hidden="true">{{ ch }}</span>
         </span>
         <span class="lc-role">Lecturer</span>
+        <span v-if="DEMO" class="lc-chip lc-chip-demo" title="The backend is not connected yet">Demo data</span>
       </div>
 
       <label class="lc-picker">
@@ -207,8 +189,6 @@ onBeforeUnmount(() => clearTimeout(toastTimer))
 
     <RescheduleDialog
       :session="editing"
-      :rooms="rooms"
-      :rooms-error="roomsError"
       :lecturer-id="lecturerId"
       :today="today"
       @close="editing = null"

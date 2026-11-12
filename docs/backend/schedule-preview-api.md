@@ -2,13 +2,13 @@
 
 Implemented and verified locally: 10 November 2026. **Read-only; direct localhost access in development only.**
 
-The user postponed step 8 (timetable quality optimization), requested implementation plus a simple service-hosted page, then confirmed selected-intake/group generation and local development with authentication deferred. This supersedes the initial whole-week default. This implementation builds on the [weekly snapshot loader](scheduling-data-loader.md) and [CP-SAT feasibility solver](cp-sat-scheduling.md). Track decisions and completion in [the backend record](agents.md) and [the development checklist](../../task_hayden.md).
+The user postponed step 8 (timetable quality optimization), requested implementation plus a simple service-hosted page, then confirmed selected-intake/group generation and local development with authentication deferred. This supersedes the initial whole-week default. This implementation builds on the [weekly snapshot loader](scheduling-data-loader.md) and [CP-SAT feasibility solver](cp-sat-scheduling.md). Track decisions and completion in [the backend record](agents.md).
 
 ## Aim
 
 Make the existing engine callable through FastAPI so a developer or authorized scheduler can select a week and inspect a complete proposed timetable without building a frontend. Generating a preview does not create class sessions, reserve resources, publish a timetable, or modify teaching occurrences.
 
-The result satisfies compulsory scheduling rules against its captured input. With step 8 postponed, it does not minimize student gaps, lecturer gaps, or room usage. A valid result may therefore contain long gaps. Preserve the accepted opening hours, arbitrary start times, and room compatibility rules.
+The result satisfies compulsory scheduling rules against its captured input. Since 12 November 2026 ([timetable quality](timetable-quality.md)) these include whole-minute starts, a 15-minute gap between bookings sharing a room/lecturer/student, and auditoriums only for classes no other permitted room can seat; the configured preferences then reduce student and lecturer idle time and empty seats.
 
 ## Request and scope
 
@@ -24,6 +24,13 @@ The result satisfies compulsory scheduling rules against its captured input. Wit
 
 The date and intake ID are illustrative; replace the intake ID with an actual database UUID. Require an exact Monday date and an intake UUID; reject unrecognized request fields. `group_number` is optional: omit it or use null for all groups in that intake, or supply a positive integer to select one group. Strings, booleans, fractions, zero and negative group numbers are rejected. Interpret the week in the configured campus timezone. Fetch actual teaching requirements and availability from the database; the caller supplies no lecturer, student roster, duration, room inventory, or booking exclusions.
 
+**Several intakes (added 12 November 2026 for the admin `/admin/schedule` page).**
+- Instead of `intake_id`, send `"intake_ids": ["<uuid>", "<uuid>", …]` (1–100 IDs; repeats are ignored). The selected intakes' pending classes, all their groups, are scheduled **together** in one model, so they cannot clash with each other.
+- Exactly one of `intake_id` and `intake_ids` is required, and `group_number` is only allowed with `intake_id`. Anything else is a 422, sent before any database read.
+- A one-item `intake_ids` behaves exactly like `intake_id`, including the same `snapshot_revision`. Two or more intakes use a revision built from the sorted ID list.
+- `POST /api/schedules/save` accepts the same `intake_ids`. The whole multi-intake preview is saved in one insert, and it is stale under any other scope.
+- The development test page still sends `intake_id`.
+
 Use the server's configured solver budget, worker count, and seed initially. This keeps the first contract small and prevents callers from requesting unbounded computation. Client-selectable options can be added deliberately later.
 
 **Implemented scope:** jointly schedule only pending occurrences for the selected intake and optional group targeting that week. Already booked classes, reservations, and meetings from every intake/group remain fixed constraints with their complete student attendance sets. Cancelled occurrences stay excluded. Unscheduled demand outside the selected scope is not assigned or treated as a reservation; separate unsaved previews can overlap until trusted saving is implemented.
@@ -38,7 +45,7 @@ The backend reads and validates the complete week's source data through several 
 4. Reuse the solver's complete-result and conflict verification. An internal verification failure must never become a successful preview.
 5. Return a typed response with safe diagnostics. Keep the operation read-only and document it in FastAPI `/docs`.
 
-One request returns its result; there is no background-job queue or polling API. The default search budget is 10 seconds; database loading, model construction, and result verification add to total request time. This is not a guaranteed 10-second HTTP deadline. Per-process capacity does not coordinate multiple server processes or reserve booking resources. A durable job workflow can be introduced if realistic workloads require it.
+One request returns its result; there is no background-job queue or polling API. The search budget is `scheduling.solver.max_time_seconds` (120 seconds since 12 November 2026; 10 seconds before); database loading, model construction, and result verification add to total request time. This is not a guaranteed HTTP deadline. Per-process capacity does not coordinate multiple server processes or reserve booking resources. A durable job workflow can be introduced if realistic workloads require it.
 
 ## Response contract
 
@@ -51,13 +58,14 @@ One request returns its result; there is no background-job queue or polling API.
 | `placements` | Occurrence, section, lecturer, room and intake IDs, group number, UTC start/end, student count, course code/name/type, room name/building |
 | `diagnostics`, `candidate_failures` | Structured explanations where available, without private attendee lists |
 | `statistics` | Actual search options, elapsed/search time, and solver statistics |
-| `quality_optimized` | Explicitly `false` while step 8 is postponed |
-| `quality` | `null` until meaningful quality measurements are implemented |
-| `scope`, `intake_id`, `group_number` | `intake` or `intake_group`, selected intake UUID and optional group number |
+| `quality_optimized` | `true` when the configured preferences produced the returned timetable (since 12 November 2026) |
+| `quality` | Measurements of a complete timetable (idle minutes, longest day, seat use, auditorium classes); `null` otherwise. See [timetable quality](timetable-quality.md) |
+| `scope`, `intake_id`, `intake_ids`, `group_number` | `intake`, `intake_group` or `intakes` (several); the intake UUID when exactly one was selected (otherwise `null`); every selected intake, sorted; optional group number |
+| `unplaced` | Classes that cannot be placed in any room at any time, with course code/name/type, intake, group and readable reasons (built from `candidate_failures`; added 12 November 2026) |
 
 Placement instants retain the engine's UTC representation alongside the campus timezone for display. The raw snapshot, student UUID sets, server credentials, and provider error bodies are excluded. Course and room labels come from the existing snapshot, without extra provider calls. Lecturer and intake display names are not loaded; the page shows their IDs. Preview results, handled errors, and page assets use `Cache-Control: no-store`.
 
-`OPTIMAL`/`FEASIBLE` provide the complete requested pending set. With the current zero-objective model, `OPTIMAL` does not mean gaps or room usage have been optimized. `INFEASIBLE` indicates no complete placement exists for the captured constraints; `UNKNOWN` means the search did not establish a complete result or impossibility. `NO_PENDING_REQUIREMENTS` is an explicit empty outcome. Never return a partial schedule as success. Diagnostics are not promised to identify a minimum conflicting set.
+`OPTIMAL`/`FEASIBLE` provide the complete requested pending set. With preferences on, `OPTIMAL` means the best timetable under the configured weights was proven; `FEASIBLE` means valid but not proven best (an `OPTIMIZATION_INCOMPLETE` diagnostic means it was not improved at all). `INFEASIBLE` indicates no complete placement exists for the captured constraints; `UNKNOWN` means the search did not establish a complete result or impossibility. `NO_PENDING_REQUIREMENTS` is an explicit empty outcome. Never return a partial schedule as success. Diagnostics are not promised to identify a minimum conflicting set.
 
 | HTTP | Meaning |
 | --- | --- |

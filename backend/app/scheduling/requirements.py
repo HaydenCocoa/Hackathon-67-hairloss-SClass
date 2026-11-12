@@ -10,6 +10,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from ..student import Supabase
 
+# class_sessions.status values. 'rescheduled' is a booking a lecturer/admin moved;
+# it occupies its room, lecturer and students exactly like 'scheduled'.
+BookingStatus = Literal["scheduled", "rescheduled", "cancelled"]
+ActiveBookingStatus = Literal["scheduled", "rescheduled"]
+ACTIVE_BOOKING_STATUSES: frozenset[str] = frozenset(("scheduled", "rescheduled"))
+
 
 class TeachingPlanInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -48,7 +54,7 @@ class TeachingOccurrence(BaseModel):
     requirement_status: Literal["required", "cancelled"]
     timezone: str
     class_session_id: UUID | None
-    booking_status: Literal["scheduled", "cancelled"] | None
+    booking_status: BookingStatus | None
     starts_at: datetime | None
     room_id: UUID | None
     needs_scheduling: bool

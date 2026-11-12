@@ -2,7 +2,7 @@
 
 Implemented and verified locally: 11 November 2026. **Local development, admin use only. Not run against hosted Supabase.**
 
-Related: [preview API record](schedule-preview-api.md), [backend record](agents.md), [checklist](../../task_hayden.md), [logging](scheduling-logging.md).
+Related: [preview API record](schedule-preview-api.md), [backend record](agents.md), [logging](scheduling-logging.md).
 
 ## Accepted decisions (11 November 2026)
 
@@ -12,14 +12,14 @@ Related: [preview API record](schedule-preview-api.md), [backend record](agents.
 | D1 | Who saves | Admin only. With no login yet, "admin only" is enforced the same way as the preview: `app.environment=development`, a direct localhost connection, an allowed Origin and no proxy headers. Login-based admin checks come with the login page. |
 | D2 | Stale preview | Reject the save if anything in the week changed since the preview, and regenerate. |
 | D3 | Concurrency | The backend rechecks, then writes with one insert. Safe against other saves through this backend process; **not** against writes from elsewhere (Supabase dashboard, another server process, the lecturer reschedule endpoint) during the short gap between the re-read and the insert. A database function would be fully safe; deferred. |
-| D4 | Audit of who saved | Not implemented. To do once the login page exists, because `schedule_changes.changed_by` must reference a signed-in user and `action` currently only allows `cancel`/`reschedule`. Saves are traced in `logs/scheduling.log` with a request ID meanwhile. |
+| D4 | Audit of who saved | Deferred until login existed. **Implemented 12 November 2026:** each saved class records the admin (`created_by`) and a database trigger adds a `schedule_changes` `create` row in the same insert. See [save audit](save-audit.md). |
 | D5 | Whole or partial | Whole preview only. |
 | D6 | Viewing saved timetables | Out of scope for step 10. |
 | D7 | Undo | No undo. Saving needs a two-step confirmation on the page. **Design remark for the future admin frontend:** keep a double confirmation (a summary step, then an explicit acknowledgement) before any save, because a save is immediately visible and cannot be undone from the UI. |
 
 ## Where the result is saved
 
-Each placement becomes one row in the existing `public.class_sessions` table. No new table or migration.
+Each placement becomes one row in the existing `public.class_sessions` table. No new table; since 12 November the [save audit](save-audit.md) migration adds `created_by` and its audit trigger.
 
 | Written column | Value |
 | --- | --- |
@@ -28,6 +28,7 @@ Each placement becomes one row in the existing `public.class_sessions` table. No
 | `room_id` | From the preview, revalidated |
 | `starts_at` | From the preview, revalidated (UTC) |
 | `status` | `scheduled` |
+| `created_by` | The saving admin's Supabase Auth user id (since 12 November; drives the [save audit](save-audit.md)) |
 
 Existing database rules then apply: one booking per occurrence (`class_session_occurrence_unique`), occurrence/section must match, cancelled occurrences cannot be booked, the occurrence's target week is synced, and every write takes the shared advisory lock. Other users see saved classes through `class_session_details` under existing row-level security.
 
@@ -58,7 +59,7 @@ Server steps, holding the **same one-at-a-time slot as generation** (a save neve
 5. Insert all rows in **one** PostgREST request (`Prefer: return=representation`). One statement, so all rows are written or none.
 6. Check Supabase returned one row per occurrence.
 
-Success: `201` with `status: "SAVED"`, `saved_count`, the scope, the revision, and `saved: [{occurrence_id, class_session_id}]`.
+Success: `201` with `status: "SAVED"`, `saved_count`, `saved_by` (admin name, since 12 November), the scope, the revision, and `saved: [{occurrence_id, class_session_id}]`.
 
 ### Errors
 
@@ -79,6 +80,7 @@ All use the existing shape `{"detail": {"code", "message", "request_id"}}` excep
 | 504 | `DATABASE_TIMEOUT` | Timed out while reading | No |
 | 504 | `SAVE_OUTCOME_UNKNOWN` | Timed out during the insert | Unknown — regenerate to check |
 | 500 | `SAVE_FAILED` | Internal error | Unknown — regenerate to check |
+| 503 | `AUDIT_NOT_INSTALLED` | The save-audit migration is not applied (`created_by` unknown to Supabase) | No |
 | 403 / 404 / 503 | existing codes | Access, environment, configuration | No |
 
 Provider messages, details and hints are never returned or logged; only the HTTP status and an allowlisted Postgres error code are kept for classification.
@@ -121,4 +123,4 @@ Using the project `.venv` (Python 3.12.3) and local synthetic data only; no host
 - The week is read with several separate requests, not one database snapshot; the revision check and the insert's advisory lock narrow but do not remove the race with writers outside this backend (D3).
 - `backend/app/lecturer.py`'s reschedule endpoint (`PATCH /api/lecturers/{id}/sessions/{id}`) writes `class_sessions` directly without validation or the scheduling slot. It was not changed (out of scope), but it is one of those outside writers.
 - The slot is per server process.
-- No audit record of who saved (D4); no undo (D7).
+- No undo (D7). Who saved is audited since 12 November ([save audit](save-audit.md)); the lecturer reschedule endpoint still writes no audit.

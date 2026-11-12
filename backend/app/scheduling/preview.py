@@ -11,13 +11,13 @@ from html import escape
 from datetime import date, timedelta
 from ipaddress import ip_address
 from pathlib import Path
-from typing import Literal
+from typing import Iterable, Literal
 from uuid import UUID
 
 import anyio
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ..auth import SessionUser, get_session, login_redirect
 from ..config import CourseType, Settings
@@ -30,13 +30,21 @@ from .solver import ClassPlacement, ScheduleResult, solve_weekly_schedule
 ASSETS = Path(__file__).resolve().parent / "development"
 # Admin-only development page (also requires development mode and localhost).
 PAGE_PATH = "/admin/development/scheduling-test-hayden"
+# Upper bound on intakes scheduled together in one preview (the model grows with every class).
+MAX_INTAKES = 100
 
 
 class GenerationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     week_start: date = Field(description="Monday of the teaching week (YYYY-MM-DD)", examples=["2026-11-16"])
-    intake_id: UUID = Field(description="Generate pending classes for this intake only")
-    group_number: int | None = Field(default=None, gt=0, strict=True, description="Optional group within the intake; omit for all its groups")
+    intake_id: UUID | None = Field(default=None, description="One intake (as used by the development test page). "
+                                                             "Give either intake_id or intake_ids.")
+    intake_ids: list[UUID] | None = Field(default=None, min_length=1, max_length=MAX_INTAKES,
+                                          description="Several intakes, scheduled together in one preview so they "
+                                                      "cannot clash with each other. All their groups are included.")
+    group_number: int | None = Field(default=None, gt=0, strict=True,
+                                     description="Optional group within intake_id; omit for all its groups. "
+                                                 "Not allowed with intake_ids.")
 
     @field_validator("week_start", mode="before")
     @classmethod
@@ -56,6 +64,26 @@ class GenerationRequest(BaseModel):
             raise ValueError("week_start must allow a complete following week boundary") from exc
         return value
 
+    @model_validator(mode="after")
+    def one_scope(self):
+        if (self.intake_id is None) == (self.intake_ids is None):
+            raise ValueError("Give either intake_id or intake_ids")
+        if self.intake_ids is not None and self.group_number is not None:
+            raise ValueError("group_number can only be used with intake_id")
+        return self
+
+    @property
+    def intakes(self) -> tuple[UUID, ...]:
+        """The selected intakes, sorted and without repeats."""
+        return tuple(sorted({self.intake_id} if self.intake_id else set(self.intake_ids), key=str))
+
+    def scope_fields(self) -> dict:
+        """scope, intake_id, intake_ids and group_number for responses."""
+        intakes = self.intakes
+        single = intakes[0] if len(intakes) == 1 else None
+        scope = "intakes" if single is None else "intake" if self.group_number is None else "intake_group"
+        return {"scope": scope, "intake_id": single, "intake_ids": list(intakes), "group_number": self.group_number}
+
 
 class SaveRequest(GenerationRequest):
     """The preview being saved: the same week/intake/group, its revision, and its classes."""
@@ -74,13 +102,25 @@ class PreviewPlacement(ClassPlacement):
     room_building: str
 
 
+class UnplacedClass(BaseModel):
+    """A pending class with no valid start in any room, labelled for people (from candidate_failures)."""
+    occurrence_id: UUID
+    course_code: str
+    course_name: str
+    course_type: CourseType
+    intake_id: UUID
+    group_number: int
+    reasons: list[str]
+
+
 class SchedulePreview(ScheduleResult):
     placements: tuple[PreviewPlacement, ...]
-    scope: Literal["intake", "intake_group"]
-    intake_id: UUID
+    scope: Literal["intake", "intake_group", "intakes"]
+    intake_id: UUID | None = Field(description="The intake when exactly one was selected; null for several")
+    intake_ids: list[UUID] = Field(description="Every selected intake, sorted")
     group_number: int | None
-    quality_optimized: Literal[False] = False
-    quality: None = None
+    unplaced: list[UnplacedClass] = Field(default_factory=list,
+                                          description="Classes that cannot be placed anywhere, with readable reasons")
 
 
 class PreviewErrorDetail(BaseModel):
@@ -98,15 +138,21 @@ def failure(status: int, code: str, message: str, name: str = "generation_reject
     return HTTPException(status, {"code": code, "message": message, "request_id": REQUEST_ID.get()}, headers={"Cache-Control": "no-store"})
 
 
-def select_scope(snapshot: SchedulingSnapshot, intake_id: UUID, group_number: int | None) -> SchedulingSnapshot:
-    """Narrow demand, preserving ALL fixed bookings and actual attendance sets."""
+def select_scope(snapshot: SchedulingSnapshot, intakes: UUID | Iterable[UUID],
+                 group_number: int | None) -> SchedulingSnapshot:
+    """Narrow demand to one or more intakes (and optionally one group of a single intake),
+    preserving ALL fixed bookings and actual attendance sets."""
+    selected = sorted({intakes} if isinstance(intakes, UUID) else set(intakes), key=str)
+    wanted = set(selected)
     requirements = tuple(item for item in snapshot.requirements
-                         if item.intake_id == intake_id and (group_number is None or item.group_number == group_number))
+                         if item.intake_id in wanted and (group_number is None or item.group_number == group_number))
     # Bind scope even for empty groups, while keeping the complete source revision
     # as a conservative invalidation boundary for later transactional saving.
+    # One intake keeps the original (version 1) form, however it was requested.
+    scope = ({"scope_version": 1, "intake_id": str(selected[0])} if len(selected) == 1
+             else {"scope_version": 2, "intake_ids": [str(item) for item in selected]})
     revision = hashlib.sha256(json.dumps({
-        "scope_version": 1, "source_revision": snapshot.revision,
-        "intake_id": str(intake_id), "group_number": group_number,
+        **scope, "source_revision": snapshot.revision, "group_number": group_number,
     }, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     return snapshot.model_copy(update={"requirements": requirements, "revision": revision})
 
@@ -154,7 +200,11 @@ def create_preview_router(settings: Settings) -> APIRouter:
         "/api/schedules/generate", response_model=SchedulePreview, dependencies=admin_only,
         responses={code: {"model": PreviewError} for code in (401, 403, 404, 429, 500, 502, 503, 504)},
         summary="Generate a read-only weekly schedule preview (local development)",
-        description="Schedules pending occurrences for one intake and optionally one group. All existing bookings remain fixed. Never saves bookings. Quality optimization is postponed.",
+        description="Schedules pending occurrences for one intake (intake_id, optionally one group) or for several "
+                    "intakes together (intake_ids). All existing bookings remain fixed. "
+                    "Compulsory rules (opening hours, whole-minute starts, room policy, capacity, no clashes, the configured gap "
+                    "between classes) are always enforced; the configured preferences (student idle time, lecturer idle time, "
+                    "room fit) then rank valid timetables, and the result includes quality measurements. Never saves bookings.",
     )
     async def generate(body: GenerationRequest, request: Request, response: Response):
         response.headers["Cache-Control"] = "no-store"
@@ -170,10 +220,11 @@ def create_preview_router(settings: Settings) -> APIRouter:
             try:
                 db = Supabase(settings.supabase, request.app.state.http_client)
                 snapshot = await load_scheduling_snapshot(db, settings.scheduling, body.week_start)
-                snapshot = select_scope(snapshot, body.intake_id, body.group_number)
+                snapshot = select_scope(snapshot, body.intakes, body.group_number)
                 event("snapshot_loaded", stage="solve", pending_count=len(snapshot.pending_requirements))
                 event("solver_started", stage="solve")
-                result = await anyio.to_thread.run_sync(solve_weekly_schedule, snapshot, settings.scheduling.solver)
+                result = await anyio.to_thread.run_sync(solve_weekly_schedule, snapshot, settings.scheduling.solver,
+                                                        settings.scheduling.quality)
                 event("solver_completed", status=result.status, placement_count=len(result.placements),
                       duration_ms=round(result.statistics.elapsed_seconds * 1000, 2))
                 if result.status == "MODEL_INVALID":
@@ -188,12 +239,20 @@ def create_preview_router(settings: Settings) -> APIRouter:
                         course_type=lesson.course_type, intake_id=lesson.intake_id, group_number=lesson.group_number,
                         room_name=room.name, room_building=room.building,
                     ))
+                unplaced = []
+                for item in result.candidate_failures:
+                    lesson = requirements[item.occurrence_id]
+                    reasons = list(dict.fromkeys(diagnostic.detail for diagnostic in item.diagnostics))
+                    unplaced.append(UnplacedClass(
+                        occurrence_id=item.occurrence_id, course_code=lesson.course_code, course_name=lesson.course_name,
+                        course_type=lesson.course_type, intake_id=lesson.intake_id, group_number=lesson.group_number,
+                        reasons=reasons,
+                    ))
                 # Keep computed fields out of nested candidate input as well.
                 # They are recomputed during response serialization.
                 return SchedulePreview(
                     **result.model_dump(exclude={"placements"}, round_trip=True), placements=tuple(placements),
-                    scope="intake" if body.group_number is None else "intake_group",
-                    intake_id=body.intake_id, group_number=body.group_number,
+                    unplaced=unplaced, **body.scope_fields(),
                 )
             except SchedulingDataError as exc:
                 raise failure(502, exc.code, exc.detail) from exc
@@ -214,10 +273,11 @@ def create_preview_router(settings: Settings) -> APIRouter:
         responses={code: {"model": PreviewError} for code in (401, 403, 404, 409, 429, 500, 502, 503, 504)},
         summary="Save a reviewed preview as real class bookings (local development, admin use)",
         description="Re-reads the week, rejects the save if anything changed since the preview, revalidates every class, "
-                    "then inserts all classes into class_sessions in one statement (all or nothing). Saved classes are "
-                    "visible immediately. There is no draft and no undo.",
+                    "then inserts all classes into class_sessions in one statement (all or nothing). Each class records "
+                    "the saving admin (created_by), and the database adds a schedule_changes 'create' audit row in the "
+                    "same statement. Saved classes are visible immediately. There is no draft and no undo.",
     )
-    async def save(body: SaveRequest, request: Request, response: Response):
+    async def save(body: SaveRequest, request: Request, response: Response, admin: SessionUser = Depends(admin_access)):
         response.headers["Cache-Control"] = "no-store"
         try:
             # Same slot as generation: a save never runs alongside a preview or another save.
@@ -232,8 +292,9 @@ def create_preview_router(settings: Settings) -> APIRouter:
                 event("save_started", placement_count=len(body.placements))
                 db = Supabase(settings.supabase, request.app.state.http_client)
                 snapshot = await load_scheduling_snapshot(db, settings.scheduling, body.week_start)
-                snapshot = select_scope(snapshot, body.intake_id, body.group_number)
-                rows = await anyio.to_thread.run_sync(prepare_rows, snapshot, body.snapshot_revision, body.placements)
+                snapshot = select_scope(snapshot, body.intakes, body.group_number)
+                rows = await anyio.to_thread.run_sync(prepare_rows, snapshot, body.snapshot_revision, body.placements,
+                                                      admin.auth_user_id)
                 event("save_validated", row_count=len(rows))
                 writing = True
                 saved = await db.insert("class_sessions", rows, "id,occurrence_id")
@@ -243,10 +304,9 @@ def create_preview_router(settings: Settings) -> APIRouter:
                                   "preview to see what was saved before trying again.", "save_rejected")
                 event("save_completed", saved_count=len(saved))
                 return SaveResult(
-                    week_start=body.week_start.isoformat(), timezone=snapshot.timezone,
-                    scope="intake" if body.group_number is None else "intake_group",
-                    intake_id=body.intake_id, group_number=body.group_number, snapshot_revision=body.snapshot_revision,
-                    saved_count=len(saved),
+                    week_start=body.week_start.isoformat(), timezone=snapshot.timezone, **body.scope_fields(),
+                    snapshot_revision=body.snapshot_revision,
+                    saved_count=len(saved), saved_by=admin.name or admin.email or "Administrator",
                     saved=[SavedClass(occurrence_id=row["occurrence_id"], class_session_id=row["id"]) for row in saved],
                 )
             except SaveRejected as exc:
@@ -256,6 +316,10 @@ def create_preview_router(settings: Settings) -> APIRouter:
             except SupabaseWriteError as exc:
                 event("save_write_failed", level=logging.WARNING, provider_status=exc.provider_status,
                       provider_code=exc.provider_code)
+                if exc.provider_code in ("PGRST204", "42703"):
+                    raise failure(503, "AUDIT_NOT_INSTALLED", "The database is missing the save-audit change "
+                                  "(migration 202611120002_save_audit.sql). Nothing was saved. Ask the project owner "
+                                  "to apply it.", "save_rejected") from exc
                 if exc.provider_code == "23505" or exc.provider_status == 409:
                     raise failure(409, "ALREADY_SAVED", "One or more of these classes were booked after the preview was "
                                   "checked. Nothing was saved. Generate a new preview.", "save_rejected") from exc

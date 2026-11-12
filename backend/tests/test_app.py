@@ -9,13 +9,15 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from backend.app.auth import SessionUser, get_session
+from backend.app import config as config_module
 from backend.app.config import load_settings
 from backend.app.main import create_app
 
 
 def logged_in(app):
     """Database health needs a login; act as a logged-in student."""
-    app.dependency_overrides[get_session] = lambda: SessionUser(role="student", name="T", profile_id="s", code="S1", home="/student")
+    app.dependency_overrides[get_session] = lambda: SessionUser(role="student", name="T", profile_id="s", code="S1", home="/student",
+                                                                auth_user_id="00000000-0000-0000-0000-0000000000a1")
     return app
 
 
@@ -151,6 +153,23 @@ def test_invalid_boot_config_fails_early(tmp_path):
     path.write_text(json.dumps({"app": {"name": "SClass"}}))
     with pytest.raises(ValidationError):
         load_settings(path)
+
+
+def test_config_path_prefers_repository_copy_and_falls_back_to_bundled_copy(tmp_path, monkeypatch):
+    # Vercel bundles only backend/; its build step copies Config/ into backend/Config/.
+    project, backend = tmp_path / "project", tmp_path / "project" / "backend"
+    primary, bundled = project / "Config" / "config.json", backend / "Config" / "config.json"
+    monkeypatch.setattr(config_module, "PROJECT_ROOT", project)
+    monkeypatch.setattr(config_module, "BACKEND_ROOT", backend)
+    bundled.parent.mkdir(parents=True)
+    bundled.write_text("{}")
+    assert config_module.default_config_path() == bundled
+    primary.parent.mkdir(parents=True)
+    primary.write_text("{}")
+    assert config_module.default_config_path() == primary
+    bundled.unlink()
+    primary.unlink()
+    assert config_module.default_config_path() == primary  # missing file still reports the real location
 
 
 def test_built_frontend_is_served_without_exposing_other_files(settings, tmp_path):

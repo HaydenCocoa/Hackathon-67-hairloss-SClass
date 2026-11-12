@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from backend.app.main import create_app
 from backend.app.scheduling import preview
-from backend.tests.test_schedule_preview import BASE, WEEK, as_admin, client_for, traces  # noqa: F401 (fixture)
+from backend.tests.test_schedule_preview import ADMIN, BASE, WEEK, as_admin, client_for, traces  # noqa: F401 (fixture)
 from backend.tests.test_scheduling_loader import provider, sql_payload, uid  # noqa: F401 (fixtures)
 
 SAVE = "/api/schedules/save"
@@ -56,8 +56,12 @@ def test_save_writes_whole_preview_in_one_insert_and_retry_is_rejected(provider)
         row = write["rows"][0]
         placement = data["placements"][0]
         # Only booking columns are written; section comes from the database, not the client.
-        assert set(row) == {"occurrence_id", "section_id", "room_id", "starts_at", "status"}
+        assert set(row) == {"occurrence_id", "section_id", "room_id", "starts_at", "status", "created_by"}
         assert row["status"] == "scheduled" and row["section_id"] == placement["section_id"]
+        # Save audit: every row names the saving admin's Supabase user; the database trigger
+        # turns it into a schedule_changes 'create' row in the same statement.
+        assert all(item["created_by"] == ADMIN.auth_user_id for item in write["rows"])
+        assert saved["saved_by"] == ADMIN.name and ADMIN.auth_user_id not in response.text
         assert row["room_id"] == placement["room_id"]
 
         # The saved class is now a fixed booking: nothing left to schedule.
@@ -77,6 +81,29 @@ def test_selected_group_save_keeps_scope(provider):
         assert response.status_code == 201
         assert response.json()["scope"] == "intake_group" and response.json()["group_number"] == 1
         assert len(state["writes"]) == 1
+
+
+def test_several_intakes_save_together_in_one_insert(provider):
+    from backend.tests.test_schedule_preview import add_lesson
+    settings, state = provider
+    add_lesson(state, 800, uid(3))
+    multi = {"week_start": WEEK["week_start"], "intake_ids": [uid(1), uid(3)]}
+    with client_for(settings) as client:
+        data = generate(client, multi)
+        body = {**save_body(data), "intake_ids": data["intake_ids"]}
+        # The same classes saved under a single intake's scope are refused (different revision).
+        single = client.post(SAVE, json={**save_body(data), "intake_id": uid(1)})
+        assert single.status_code == 409 and detail(single)["code"] == "PREVIEW_STALE" and not state["writes"]
+        response = client.post(SAVE, json=body)
+        assert response.status_code == 201, response.text
+        saved = response.json()
+        assert saved["scope"] == "intakes" and saved["intake_id"] is None and saved["intake_ids"] == [uid(1), uid(3)]
+        assert saved["saved_count"] == 2 and len(state["writes"]) == 1 and len(state["writes"][0]["rows"]) == 2
+        assert generate_status(client, multi) == "NO_PENDING_REQUIREMENTS"
+
+
+def generate_status(client, body):
+    return client.post("/api/schedules/generate", json=body).json()["status"]
 
 
 def test_preview_is_stale_when_the_week_changes_or_scope_differs(provider):
@@ -152,6 +179,9 @@ def test_invalid_save_request_is_rejected_before_any_database_call(provider, edi
     (403, {"code": "42501", "details": "PRIVATE-PROVIDER-TEXT"}, 502, "DATABASE_PERMISSION_DENIED"),
     (500, "<html>PRIVATE-PROVIDER-TEXT</html>", 502, "DATABASE_UNAVAILABLE"),
     (201, [], 502, "SAVE_UNCONFIRMED"),
+    # The save-audit migration is not applied: PostgREST does not know created_by.
+    (400, {"code": "PGRST204", "message": "PRIVATE-PROVIDER-TEXT"}, 503, "AUDIT_NOT_INSTALLED"),
+    (400, {"code": "42703", "message": "PRIVATE-PROVIDER-TEXT"}, 503, "AUDIT_NOT_INSTALLED"),
 ])
 def test_database_write_errors_are_safe_and_release_the_slot(provider, traces, status, body, http, code):  # noqa: F811
     settings, state = provider

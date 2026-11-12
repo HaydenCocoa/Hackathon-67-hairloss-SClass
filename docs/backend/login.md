@@ -2,7 +2,7 @@
 
 Implemented and verified locally: 12 November 2026, branch `feature-login`. **Not run against the hosted Supabase project.**
 
-Related: [backend record](agents.md), [checklist](../../task_hayden.md), [scheduling preview](schedule-preview-api.md), [timetable saving](timetable-saving.md).
+Related: [backend record](agents.md), [scheduling preview](schedule-preview-api.md), [timetable saving](timetable-saving.md).
 
 ## Requirement
 
@@ -47,6 +47,7 @@ Later requests: cookie → FastAPI asks Supabase /auth/v1/user (cached 60 s) →
 | `/student` | → `/login?next=/student` | Students only; others → own home |
 | `/lecturer` | → `/login?next=/lecturer` | Lecturers only; others → own home |
 | `/admin` | → `/login?next=/admin` | Admins only; others → own home |
+| `/admin/schedule` | → `/login?next=/admin/schedule` | Admins only; others → own home. Scheduling workspace opened from Admin > Timetable > Schedule Class (added 12 November 2026). Its generate/save calls also need development mode and localhost |
 | `/admin/development/scheduling-test-hayden` | → `/login?next=…` | Admins only (plus development mode and localhost) |
 
 The backend applies these rules when a page is loaded directly; the Vue app repeats them for the Vite dev server and in-app navigation. If any API call returns 401 later (session expired), the app sends the user to `/login` and back afterwards. A thin bar above each page shows the user's name, role and a **Log out** button.
@@ -63,6 +64,7 @@ The backend applies these rules when a page is loaded directly; the Vue app repe
 | `GET /api/lecturers/{id}/timetable` | Lecturers: their own id only; admins: any |
 | `PATCH /api/lecturers/{id}/sessions/{sid}` | Lecturers: own id **and** the class must belong to that lecturer; admins: any lecturer's class |
 | `POST /api/schedules/generate`, `POST /api/schedules/save`, scheduling page and assets | Admins only, plus development mode and localhost |
+| `/api/admin/*` (admin page) | Admins only: the login session, or a pasted Supabase token (since 12 November 2026). Timetable changes run in the database as that admin. |
 
 Errors: `401 AUTH_REQUIRED`, `403 FORBIDDEN_ROLE` / `ADMIN_REQUIRED`; login errors `INVALID_CREDENTIALS` (401), `ACCOUNT_NOT_LINKED` / `EMAIL_NOT_CONFIRMED` (403), `TOO_MANY_ATTEMPTS` (429), `AUTH_NOT_CONFIGURED` (503), `AUTH_UNAVAILABLE` (502), `AUTH_TIMEOUT` (504). The student endpoints keep their existing plain-text error style. Passwords and tokens are never returned in response bodies or logged.
 
@@ -116,5 +118,5 @@ Local stand-ins only; the hosted Supabase project was not contacted.
 - All Supabase Auth requests come from the backend's address, so Supabase's per-IP login rate limit is shared by all users of one server.
 - The student page still has its own "Switch" button and code box (not changed, decision 7); entering another student's code now returns 403.
 - The backend still reads data with the service key and enforces access in Python; the database's row-level security policies (which use `auth.uid()`) are not used by these requests.
-- The save audit (`schedule_changes.changed_by`) is now possible because the admin is known, but is not implemented (needs a database change to allow a "create" action).
+- The save audit was implemented on 12 November using the session's Supabase user id ([save audit](save-audit.md)). `SessionUser.auth_user_id` is server-side only and is not returned by `/api/auth/*`.
 - `frontend/src/student/README.md` and `frontend/src/lecturer/README.md` still mention the old `#/student` and `#/lecturer` addresses; they belong to those pages' owners and were left unchanged.

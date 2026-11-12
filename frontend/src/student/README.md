@@ -1,6 +1,7 @@
 # Student Page (Bi Jin)
 
-Log in as a student and you land on **http://127.0.0.1:5173/student**. App.vue passes the signed-in student's code as `<StudentPage :student-code="session.code" />`.
+Log in as a student at **http://127.0.0.1:5173/login**; students are sent to **/student**. (Old `#/student` links redirect there.) 
+App.vue passes the signed-in student's code as `<StudentPage :student-code="session.code" />`.
 
 ## What it does
 
@@ -34,6 +35,5 @@ Try it at http://127.0.0.1:8000/docs. The backend uses the server key from `.env
 
 ## Notes for the team
 
-- **Login (Hayden):** done. The backend only lets a student open their own code (admins can open any).
-- **Reschedule/cancel (Ting Ju / Edward):** when writing `schedule_changes`, put `starts_at` and `room_id` in `old_values` / `new_values` (e.g. `{"starts_at": "...", "room_id": "..."}`). The Student Page reads these keys to show "was → now". Set `class_sessions.status = 'cancelled'` for cancellations.
-- Request-a-meeting (optional feature) is not built yet: `meeting_sessions.status` only allows `scheduled`/`cancelled`, so a request/approval status or table is needed first.
+- **Login (done 12 November 2026):** the backend checks the login session, so a student can only read their own profile and timetable; another student's code returns 403 (admins may read any). 
+- The page uses the signed-in student's code; the old code box and "Switch" button have been removed. See [login](../../../docs/backend/login.md).
