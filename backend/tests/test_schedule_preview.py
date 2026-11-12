@@ -2,6 +2,7 @@ import copy
 import json
 import logging
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 
@@ -471,3 +472,81 @@ def test_internal_failure_logs_stack_locations_without_messages_or_locals(provid
     assert failure["frames"] and failure["frames"][-1]["function"] == "failing_solver"
     assert all("/" not in frame["file"] and "\\" not in frame["file"] for frame in failure["frames"])
     assert "PRIVATE-STUDENT-RECORD" not in response.text + json.dumps(traces)
+
+
+# ---- Pause: POST /api/schedules/generate/stop, 13 November 2026 ----
+
+RUN = "6f1c2a7e-3b9d-4c5e-8f0a-1b2c3d4e5f60"
+
+
+def test_pause_stops_the_running_preview_and_returns_what_it_has(provider, monkeypatch):
+    settings, state = provider
+    started = Event()
+    real_solve = preview.solve_weekly_schedule
+
+    def slow_solver(snapshot, options, quality, stop):
+        started.set()
+        deadline = time.monotonic() + 5
+        while not stop.requested and time.monotonic() < deadline:  # a long search, until paused
+            time.sleep(0.02)
+        return real_solve(snapshot, options, quality, stop)
+
+    monkeypatch.setattr(preview, "solve_weekly_schedule", slow_solver)
+    with client_for(settings) as client, ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(client.post, "/api/schedules/generate", json={**WEEK, "run_id": RUN})
+        assert started.wait(5)
+        other = client.post("/api/schedules/generate/stop", json={"run_id": "00000000-0000-0000-0000-000000000001"})
+        assert other.status_code == 200 and other.json() == {"stopped": False}
+        paused = client.post("/api/schedules/generate/stop", json={"run_id": RUN})
+        assert paused.status_code == 200 and paused.json() == {"stopped": True}
+        assert paused.headers["cache-control"] == "no-store"
+        response = future.result(timeout=5)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["stopped"] is True and data["status"] == "UNKNOWN" and not data["has_solution"]
+        assert data["diagnostics"][0]["code"] == "STOPPED"
+        # Finished runs are forgotten, and the slot is free again.
+        assert client.post("/api/schedules/generate/stop", json={"run_id": RUN}).json() == {"stopped": False}
+        assert client.post("/api/schedules/generate", json=WEEK).json()["stopped"] is False
+
+
+def test_only_the_admin_who_started_a_preview_can_pause_it(provider, monkeypatch):
+    settings, _ = provider
+    started, release = Event(), Event()
+    real_solve = preview.solve_weekly_schedule
+
+    def waiting_solver(*args):
+        started.set()
+        assert release.wait(5)
+        return real_solve(*args)
+
+    monkeypatch.setattr(preview, "solve_weekly_schedule", waiting_solver)
+    app = create_app(settings)
+    with TestClient(app, base_url=BASE, client=("127.0.0.1", 51000)) as client, ThreadPoolExecutor(max_workers=1) as executor:
+        app.dependency_overrides[get_session] = lambda: ADMIN
+        future = executor.submit(client.post, "/api/schedules/generate", json={**WEEK, "run_id": RUN})
+        try:
+            assert started.wait(5)
+            app.dependency_overrides[get_session] = lambda: ADMIN.model_copy(update={"profile_id": "someone-else"})
+            assert client.post("/api/schedules/generate/stop", json={"run_id": RUN}).json() == {"stopped": False}
+            app.dependency_overrides[get_session] = lambda: None
+            assert client.post("/api/schedules/generate/stop", json={"run_id": RUN}).status_code == 401
+            app.dependency_overrides[get_session] = lambda: ADMIN.model_copy(update={"role": "lecturer"})
+            assert client.post("/api/schedules/generate/stop", json={"run_id": RUN}).status_code == 403
+        finally:
+            release.set()
+        assert future.result(timeout=10).json()["stopped"] is False
+
+
+@pytest.mark.parametrize("body", [{}, {"run_id": "not-a-uuid"}, {"run_id": RUN, "extra": 1}])
+def test_stop_request_is_validated(provider, body):
+    settings, _ = provider
+    with client_for(settings) as client:
+        assert client.post("/api/schedules/generate/stop", json=body).status_code == 422
+
+
+def test_stop_rejects_other_sites(provider):
+    settings, _ = provider
+    with client_for(settings) as client:
+        response = client.post("/api/schedules/generate/stop", json={"run_id": RUN}, headers={"Origin": "https://evil.example"})
+        assert response.status_code == 403 and response.json()["detail"]["code"] == "ORIGIN_NOT_ALLOWED"

@@ -7,6 +7,7 @@ time, lecturer idle time, room fit) only rank timetables that already satisfy
 every compulsory rule.
 """
 
+import threading
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -64,7 +65,7 @@ class ClassPlacement(_Frozen):
 
 class ScheduleDiagnostic(_Frozen):
     code: Literal["NO_PENDING_REQUIREMENTS", "NO_CANDIDATES", "JOINT_CONSTRAINTS_INFEASIBLE", "SEARCH_INCOMPLETE",
-                  "MODEL_INVALID", "OPTIMIZATION_INCOMPLETE"]
+                  "MODEL_INVALID", "OPTIMIZATION_INCOMPLETE", "STOPPED"]
     detail: str
     occurrence_id: UUID | None = None
 
@@ -95,6 +96,8 @@ class ScheduleResult(_Frozen):
     diagnostics: tuple[ScheduleDiagnostic, ...]
     statistics: SolverStatistics
     quality_optimized: bool = Field(default=False, description="True when the configured preferences ranked this timetable")
+    stopped: bool = Field(default=False, description="True when an administrator paused the search before its time limit. "
+                                                     "A complete timetable is then the best one found so far.")
     quality: QualityReport | None = Field(default=None, description="Measurements of a complete timetable")
 
     @computed_field
@@ -112,6 +115,38 @@ class ScheduleResult(_Frozen):
         elif self.placements:
             raise ValueError("An unsuccessful result cannot publish partial assignments")
         return self
+
+
+class StopSignal:
+    """Ends a running solve early from another thread (the Pause button on /admin/schedule).
+
+    CP-SAT ignores a stop sent in the instant between attaching a solver and its search
+    starting, so callers repeat request() until the solve returns; repeating is harmless."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._requested = False
+        self._solver: cp_model.CpSolver | None = None
+
+    @property
+    def requested(self) -> bool:
+        return self._requested
+
+    def request(self) -> None:
+        with self._lock:
+            self._requested = True
+            if self._solver is not None:
+                self._solver.stop_search()
+
+    def attach(self, solver: cp_model.CpSolver) -> bool:
+        """Remember the solver about to run; False when a stop was already requested."""
+        with self._lock:
+            self._solver = solver
+            return not self._requested
+
+    def detach(self) -> None:
+        with self._lock:
+            self._solver = None
 
 
 @dataclass
@@ -338,22 +373,27 @@ def _placements(solver: cp_model.CpSolver, decisions: list[_Decision], origin: d
 
 
 def solve_weekly_schedule(snapshot: SchedulingSnapshot, options: SolverSettings | None = None,
-                          quality: QualitySettings | None = None) -> ScheduleResult:
+                          quality: QualitySettings | None = None, stop: StopSignal | None = None) -> ScheduleResult:
     """Find a complete draft for pending lessons; never writes to the database.
 
     Pass settings.scheduling.solver and settings.scheduling.quality to use the
     configured search options and preferences. The time limit covers both CP-SAT
     searches (first a complete valid timetable, then improving it with the
     remaining time), not loading, candidate construction or QA.
+
+    `stop` lets another thread pause the search: the result then has stopped=True and is
+    either the best complete timetable found so far (FEASIBLE) or none (UNKNOWN).
     """
     started = perf_counter()
     options = SolverSettings.model_validate(options.model_dump() if options is not None else {})
     quality = quality if quality is not None else QualitySettings()
     required_count = len(snapshot.pending_requirements)
+    stop = stop if stop is not None else StopSignal()
     runs: list[cp_model.CpSolver] = []
     extra: dict = {}
 
-    def result(status: SolverOutcome, *, placements=(), failures=(), diagnostics=(), optimized=False) -> ScheduleResult:
+    def result(status: SolverOutcome, *, placements=(), failures=(), diagnostics=(), optimized=False,
+               stopped=False) -> ScheduleResult:
         statistics = SolverStatistics(
             solver_ran=bool(runs), max_time_seconds=options.max_time_seconds,
             num_search_workers=options.num_search_workers, random_seed=options.random_seed,
@@ -365,8 +405,25 @@ def solve_weekly_schedule(snapshot: SchedulingSnapshot, options: SolverSettings 
         return ScheduleResult(status=status, snapshot_revision=snapshot.revision, week_start=snapshot.week_start,
                               timezone=snapshot.timezone, required_count=required_count, placements=placements,
                               candidate_failures=failures, diagnostics=diagnostics, statistics=statistics,
-                              quality_optimized=optimized,
+                              quality_optimized=optimized, stopped=stopped,
                               quality=measure_quality(snapshot, placements) if placements else None)
+
+    def paused(placements=(), optimized=False) -> ScheduleResult:
+        if placements:
+            return result("FEASIBLE", placements=placements, optimized=optimized, stopped=True, diagnostics=(ScheduleDiagnostic(
+                code="STOPPED", detail="Scheduling was paused; this is the best valid timetable found so far."),))
+        return result("UNKNOWN", stopped=True, diagnostics=(ScheduleDiagnostic(
+            code="STOPPED", detail="Scheduling was paused before a complete timetable was found."),))
+
+    def run(solver: cp_model.CpSolver) -> int | None:
+        """Solve unless paused already; None means it never started."""
+        if not stop.attach(solver):
+            return None
+        runs.append(solver)  # only searches that ran count in the statistics
+        try:
+            return solver.solve(model)
+        finally:
+            stop.detach()
 
     if not required_count:
         return result("NO_PENDING_REQUIREMENTS", diagnostics=(ScheduleDiagnostic(
@@ -377,6 +434,8 @@ def solve_weekly_schedule(snapshot: SchedulingSnapshot, options: SolverSettings 
         return result("INFEASIBLE", failures=failures, diagnostics=tuple(ScheduleDiagnostic(
             code="NO_CANDIDATES", detail="This pending lesson has no valid room/start range in the captured week.",
             occurrence_id=item.occurrence_id) for item in failures))
+    if stop.requested:
+        return paused()
     model, decisions = _build_model(snapshot, candidates)
     if model.validate():
         return result("MODEL_INVALID", diagnostics=(ScheduleDiagnostic(
@@ -384,8 +443,9 @@ def solve_weekly_schedule(snapshot: SchedulingSnapshot, options: SolverSettings 
 
     # Search 1: any complete timetable that satisfies every compulsory rule.
     first = _solver(options, options.max_time_seconds)
-    runs.append(first)
-    status = first.solve(model)
+    status = run(first)
+    if status is None:
+        return paused()
     names: dict[int, SolverOutcome] = {
         cp_model.OPTIMAL: "OPTIMAL", cp_model.FEASIBLE: "FEASIBLE", cp_model.INFEASIBLE: "INFEASIBLE",
         cp_model.MODEL_INVALID: "MODEL_INVALID", cp_model.UNKNOWN: "UNKNOWN",
@@ -395,8 +455,12 @@ def solve_weekly_schedule(snapshot: SchedulingSnapshot, options: SolverSettings 
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         complete = _placements(first, decisions, snapshot.horizon_starts_at)
         verify_placements(snapshot, complete)
+        if stop.requested and status != cp_model.OPTIMAL:
+            return paused(complete)
         if not quality.active:
             return result(names[status], placements=complete)
+        if stop.requested:
+            return paused(complete)
 
         # Search 2: improve that timetable under the configured preferences, starting from it.
         remaining = options.max_time_seconds - first.wall_time
@@ -408,17 +472,24 @@ def solve_weekly_schedule(snapshot: SchedulingSnapshot, options: SolverSettings 
             for selected in decision.room_choices.values():
                 model.add_hint(selected, first.value(selected))
         second = _solver(options, remaining)
-        runs.append(second)
-        improved = second.solve(model)
+        improved = run(second)
+        if improved is None:
+            return paused(complete)
         extra.update(optimization_ran=True, optimization_wall_time_seconds=second.wall_time)
         if improved in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             better = _placements(second, decisions, snapshot.horizon_starts_at)
             verify_placements(snapshot, better)
             extra.update(objective_value=second.objective_value, best_bound=second.best_objective_bound)
+            if stop.requested and improved != cp_model.OPTIMAL:
+                return paused(better, optimized=True)
             # OPTIMAL now means: best possible under the configured preferences.
             return result("OPTIMAL" if improved == cp_model.OPTIMAL else "FEASIBLE", placements=better, optimized=True)
+        if stop.requested:
+            return paused(complete)
         return result("FEASIBLE", placements=complete, diagnostics=(ScheduleDiagnostic(
             code="OPTIMIZATION_INCOMPLETE", detail="A valid timetable was found but the improvement search did not finish; the first valid timetable is returned."),))
+    if status == cp_model.UNKNOWN and stop.requested:
+        return paused()
     if status == cp_model.INFEASIBLE:
         diagnostic = ScheduleDiagnostic(code="JOINT_CONSTRAINTS_INFEASIBLE", detail="No joint assignment satisfies all fixed and new-class constraints in this captured week.")
     elif status == cp_model.MODEL_INVALID:

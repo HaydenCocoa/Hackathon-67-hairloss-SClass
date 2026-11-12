@@ -402,7 +402,7 @@ Historical discussion; superseded by the implementation record below after the u
   - Confirm the two interpretations (gap scope, capacity-based auditorium rule).
   - Decide whether to add a "fewer days on campus" preference.
   - Check preview time on hosting.
-- **Time limit raised (12 November 2026):** at the user's request `scheduling.solver.max_time_seconds` is now 120 s (was 10 s). **Raised again to 280 s on 13 November 2026** (see that entry). An unlimited value is not supported (0 and infinity are rejected at startup). With preferences on, a preview can take up to about 2 minutes plus loading time, holding the one-at-a-time slot.
+- **Time limit raised (12 November 2026):** at the user's request `scheduling.solver.max_time_seconds` is now 120 s (was 10 s). **Raised again to 280 s on 13 November 2026, then set to 60 s the same day** (see those entries). An unlimited value is not supported (0 and infinity are rejected at startup). With preferences on, a preview can take up to about 2 minutes plus loading time, holding the one-at-a-time slot.
 
 ## `main` merge repair — 12 November 2026
 
@@ -645,6 +645,12 @@ Historical discussion; superseded by the implementation record below after the u
   - Plans: 42, of which 36 are CS(CYB) and 6 SE. Class sessions: 8, all SE.
   - **The CS(CYB) scripts and `seed_students.sql` still use the old codes.** Do not rerun `seed_courses_cyb.sql` or `seed_students.sql`. The other scripts stop or do nothing until their codes are updated.
   - Documentation only; no data changed. Table: [hosted state](cyb-course-seed.md#hosted-database-state--13-november-2026).
+- **Separate Year 2 and Year 3 students (13 November 2026, user request):**
+  - Problem: the renamed CS(CYB) intakes still shared the same 80 sample students.
+  - [supabase/split_cyb_students.sql](../../supabase/split_cyb_students.sql) removes all current members from `APD2F2611CS(CYB)` and `APD3F2611CS(CYB)`; they stay in Year 1.
+  - It adds 80 new single-intake students to each: `TP001001`–`TP001080` and `TP001081`–`TP001160`, 40 per group, with new surnames so no name repeats.
+  - Hosted codes, names and the affected students were checked read-only first.
+  - 19 checks passed locally; to be run by the user. Details: [CS(CYB) course seed](cyb-course-seed.md#separate-students-for-years-2-and-3--13-november-2026).
 - **Assumptions to confirm:** Year 3 module abbreviations are made up. Year 1/2 lecture+lab versus lecture+tutorial is inferred. Both Year 3 electives are included. Semesters are not stored. Details and the Year 3 teaching weeks: [CS(CYB) course seed](cyb-course-seed.md).
 - **Verification:** new `supabase/tests/courses-cyb.test.cjs` passed 39 checks on PGlite, run on both the legacy schema and the schema without the room column. `courses.test.cjs` still passes 20. Not run on hosted Supabase.
 
@@ -724,3 +730,34 @@ Historical discussion; superseded by the implementation record below after the u
   - If loading the week from Supabase takes longer than about 20 s, Vercel stops the request at 300 s. The page then shows the `SERVER_TIMEOUT` message.
   - Vercel notes that idle HTTP/1.1 connections may be closed by network layers during long requests. Not checked on the live site.
 - **Verification:** the configuration loads with the new value (`load_settings()`), and the preview tests pass. Not run on Vercel.
+
+## Scheduling time limit set to 1 minute — 13 November 2026
+
+- **Requirement (user):** "change back the config time for scheduling to 1 minutes", on a new branch (`scheduling-time-limit-1-minute`).
+- **Change:**
+  - `Config/config.json` `scheduling.solver.max_time_seconds` is now **60** (was 280 from the entry above).
+  - `/admin/schedule` now says a preview "can take a minute or a little longer".
+  - `test_solver.py` expects 60. The docs were updated: timetable quality, preview API, CP-SAT, README and Vercel deployment.
+  - `vercel.json` is unchanged.
+- **Effect:**
+  - A preview's search stops after 60 s, then loading and checking are added. It holds the one-at-a-time slot (`GENERATION_BUSY`) for about that long.
+  - With less search time, a week that needs a long search may end with `UNKNOWN` (no timetable found yet), or with a valid but less polished timetable (more idle time). Compulsory rules are unchanged. For comparison, the synthetic CS(CYB) week reached OPTIMAL in 91 s; under 60 s it would stop with the best timetable found so far, if any.
+- **Verification:** `load_settings()` returns 60; `test_solver.py` 29 passed; preview page tests 9/9. Not run on Vercel or against hosted Supabase.
+
+## Pause button for scheduling — 13 November 2026
+
+- **Requirement (user):** "add a pause button on the scheduling page, which should stop the current scheduling work". Branch `scheduling-time-limit-1-minute`.
+- **Decision:** a stopped CP-SAT search cannot be resumed, so **Pause stops the search and keeps what it has**: the best complete, valid timetable found so far, or none. Generating again starts a new search. The button is labelled Pause as asked; the page text says what it does.
+- **Change:**
+  - `solver.py`: `StopSignal` (thread-safe; calls CP-SAT `stop_search()` on the running search). `solve_weekly_schedule(..., stop=)` returns `FEASIBLE` with `stopped=True` and a `STOPPED` diagnostic when a valid timetable was found, `UNKNOWN` with `stopped=True` otherwise. A proven `OPTIMAL`/`INFEASIBLE` result is still reported as such. New `ScheduleResult.stopped` field.
+  - `preview.py`: optional `run_id` on generate; new `POST /api/schedules/generate/stop` (admin, same-site, only the admin who started the run). While solving, a watcher checks every 0.5 s for a stop request or a disconnected caller and repeats the stop (CP-SAT can miss a stop sent just as a search starts).
+  - `/admin/schedule`: an amber **Pause** button beside Generate while a preview runs. Pause calls the stop endpoint and waits for the answer (up to 15 s), or, when the stop is not accepted (for example another Vercel instance), stops waiting at once. A paused run with a timetable can be scheduled as usual; a paused run without one keeps the previous preview and says so.
+  - Logging: the `solver_completed` event has `stopped`; new `generation_stop_requested` event; the stop path is traced.
+  - Docs: [preview API](schedule-preview-api.md) (Pause section and `stopped` field), [timetable quality](timetable-quality.md) (preview time), README.
+- **Limits:**
+  - The stop reaches only the server process running the preview. On Vercel a stop request may land on another instance; the page then stops waiting, and the search stops only if the platform passes the closed connection on to the function. Not checked on Vercel.
+  - Time spent loading the week from Supabase is not interrupted; the stop takes effect when the search starts (straight away).
+- **Verification:**
+  - Backend: 7 new solver/endpoint tests and 3 validation cases. A real CP-SAT search with a 30 s limit (a hard "market split" model) stopped about 0.5 s after Pause. Pause during improvement keeps the first valid timetable. Only the same admin can pause; logged-out 401, lecturer 403, wrong origin 403, bad bodies 422. `test_solver.py` + `test_schedule_preview.py`: 93 passed, with the same 2 failures as before this change (provider 401 code, timeout/missing config).
+  - Frontend: 25/25 admin page tests (3 new for Pause); build succeeds.
+  - Headless Edge against the real backend on synthetic data, with a solver that waits for Pause. Checked: Pause shown while generating; paused with no timetable; paused with a timetable kept and Schedule enabled; a refused stop (page stops waiting, and the server stopped its search about 1.5 s later because the connection closed); next Generate runs at once; phone layout. Not run against hosted Supabase or Vercel.

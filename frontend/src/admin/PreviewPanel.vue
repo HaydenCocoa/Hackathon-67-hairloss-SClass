@@ -16,6 +16,8 @@ const props = defineProps({
   saved: { type: Object, default: null }, // { count, by, week }
   elapsed: { type: Number, default: 0 },
   outdated: Boolean,
+  pausing: Boolean, // Pause was pressed; waiting for the server to stop
+  notice: { type: String, default: '' }, // a status line, e.g. after Pause
   names: { type: Object, required: true }, // { intakes: Map(id -> code), lecturers: Map(id -> name) }
 })
 
@@ -46,7 +48,7 @@ const layout = computed(() => layoutEvents(shownRows.value, props.preview?.week_
 const byDay = computed(() => (props.preview ? rowsByDay(shownRows.value, props.preview.week_start) : []))
 const intakeCodes = computed(() => (props.preview?.intake_ids || []).map((id) => props.names.intakes.get(String(id)) || 'Unknown intake'))
 const otherDiagnostics = computed(() => (props.preview && !props.preview.has_solution && !props.preview.unplaced?.length
-  ? props.preview.diagnostics.map((item) => item.detail) : []))
+  ? props.preview.diagnostics.filter((item) => item.code !== 'STOPPED').map((item) => item.detail) : []))
 const clock = computed(() => `${Math.floor(props.elapsed / 60)}:${String(props.elapsed % 60).padStart(2, '0')}`)
 
 // A new preview starts on its first intake (several intakes in one calendar would crowd it).
@@ -82,10 +84,14 @@ const dayTitle = (iso) => days.value.find((day) => day.iso === iso)?.label || is
       <small v-if="error.requestId" class="pp-request">Request ID: {{ error.requestId }}</small>
     </div>
 
+    <div v-if="notice && phase !== 'generating'" class="pp-banner pp-warning" role="status">{{ notice }}</div>
+
     <div v-if="phase === 'generating'" class="pp-empty" aria-busy="true">
       <span class="pp-spinner" aria-hidden="true"></span>
-      <h2>Generating the preview… <span class="pp-clock">{{ clock }}</span></h2>
-      <p>Placing every pending class of the selected intakes while keeping existing classes fixed. This can take up to about five minutes.</p>
+      <h2 v-if="pausing">Pausing… <span class="pp-clock">{{ clock }}</span></h2>
+      <h2 v-else>Generating the preview… <span class="pp-clock">{{ clock }}</span></h2>
+      <p v-if="pausing">Stopping the search. The best timetable found so far, if any, will be shown in a moment.</p>
+      <p v-else>Placing every pending class of the selected intakes while keeping existing classes fixed. This can take a minute or a little longer. Select <strong>Pause</strong> to stop early and see the best timetable found so far.</p>
     </div>
 
     <div v-else-if="!preview" class="pp-empty">

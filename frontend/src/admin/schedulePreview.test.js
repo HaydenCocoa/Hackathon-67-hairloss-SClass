@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
-  errorAdvice, filterChoices, generateBody, groupChoices, keepsPreview, matchesFilter, matchesGroup, outcome, placementRows,
+  errorAdvice, filterChoices, generateBody, groupChoices, keepsPreview, matchesFilter, matchesGroup, newRunId, outcome, placementRows,
   rowsByDay, saveBody,
   selectionKey, summaryCards, weekTitle,
 } from './schedulePreview.js'
@@ -103,7 +103,7 @@ test('an intake can be narrowed to one of its groups', () => {
 
 // ---------- scheduleApi.js against a fake fetch ----------
 globalThis.window = { location: { pathname: '/admin/schedule', assign(url) { window.location.assigned = url } } }
-const { ScheduleApiError, generatePreview, listIntakes, savePreview } = await import('./scheduleApi.js')
+const { PAUSED, ScheduleApiError, generatePreview, listIntakes, savePreview, stopPreview } = await import('./scheduleApi.js')
 
 function fakeFetch(status, body, headers = {}) {
   const calls = []
@@ -150,4 +150,47 @@ test('an ended session sends the person to log in and back to this page', async 
   fakeFetch(401, { detail: 'Admin sign-in required.' })
   await assert.rejects(listIntakes(), (e) => e.code === 'AUTH_REQUIRED')
   assert.equal(window.location.assigned, '/login?next=%2Fadmin%2Fschedule')
+})
+
+// ---------- Pause ----------
+test('a paused preview is explained, with or without a timetable', () => {
+  const kept = outcome(preview({ stopped: true, status: 'FEASIBLE' }))
+  assert.equal(kept.tone, 'warning')
+  assert.match(kept.title, /^Paused: 2 classes placed/)
+  assert.match(kept.text, /You can schedule this timetable/)
+  const none = outcome(preview({ stopped: true, has_solution: false, status: 'UNKNOWN', placements: [] }))
+  assert.deepEqual([none.tone, none.title], ['neutral', 'Scheduling paused'])
+  assert.match(none.text, /Nothing was saved/)
+})
+
+test('each Generate press gets its own run id, sent with the request', () => {
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+  assert.match(newRunId(), uuid)
+  // Without crypto.randomUUID (an older browser or plain-HTTP page) it is built from random bytes.
+  const fallback = newRunId({ getRandomValues: (bytes) => bytes.fill(255) })
+  assert.match(fallback, uuid)
+  assert.notEqual(newRunId(), newRunId())
+  assert.deepEqual(generateBody('2026-11-16', ['b', 'a'], 'run-1'), { week_start: '2026-11-16', intake_ids: ['a', 'b'], run_id: 'run-1' })
+})
+
+test('Pause asks the server to stop that run; aborting the wait is reported as paused', async () => {
+  const calls = fakeFetch(200, { stopped: true })
+  const { data } = await stopPreview('run-1')
+  assert.equal(calls[0].url, '/api/schedules/generate/stop')
+  assert.equal(calls[0].options.method, 'POST')
+  assert.deepEqual(JSON.parse(calls[0].options.body), { run_id: 'run-1' })
+  assert.equal(data.stopped, true)
+
+  const seen = fakeFetch(200, preview())
+  const controller = new AbortController()
+  await generatePreview('2026-11-16', ['I1'], { runId: 'run-2', signal: controller.signal })
+  assert.equal(JSON.parse(seen[0].options.body).run_id, 'run-2')
+  assert.equal(seen[0].options.signal, controller.signal)
+
+  globalThis.fetch = async (url, options) => new Promise((resolve, reject) => {
+    options.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })))
+  })
+  const waiting = generatePreview('2026-11-16', ['I1'], { runId: 'run-3', signal: controller.signal })
+  controller.abort()
+  await assert.rejects(waiting, (e) => e instanceof ScheduleApiError && e.code === PAUSED && /paused/.test(e.message))
 })

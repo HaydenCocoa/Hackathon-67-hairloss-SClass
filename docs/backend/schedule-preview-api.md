@@ -45,7 +45,13 @@ The backend reads and validates the complete week's source data through several 
 4. Reuse the solver's complete-result and conflict verification. An internal verification failure must never become a successful preview.
 5. Return a typed response with safe diagnostics. Keep the operation read-only and document it in FastAPI `/docs`.
 
-One request returns its result; there is no background-job queue or polling API. The search budget is `scheduling.solver.max_time_seconds` (280 seconds since 13 November 2026, so a whole request takes at most about 5 minutes; 120 seconds from 12 November; 10 seconds before); database loading, model construction, and result verification add to total request time. This is not a guaranteed HTTP deadline. Per-process capacity does not coordinate multiple server processes or reserve booking resources. A durable job workflow can be introduced if realistic workloads require it.
+**Pause (added 13 November 2026).** The admin page can stop a running preview early:
+- The page sends a random `run_id` (UUID) with the generate request. While that preview runs, `POST /api/schedules/generate/stop` with `{"run_id": "<uuid>"}` (admin login and same-site `Origin`, like generate) tells the solver to stop. The answer is `{"stopped": true}` when this server process is running that preview for the same admin, otherwise `{"stopped": false}` (finished already, another admin's run, unknown id, or another server instance).
+- The generate request then returns within about half a second, with `stopped: true`: either the best complete timetable found so far (`FEASIBLE`, can be saved like any complete preview) or none (`UNKNOWN`), with a `STOPPED` diagnostic. A search that had already proved its result (`OPTIMAL`, `INFEASIBLE`) reports that instead.
+- If the stop is not accepted, the page stops waiting (aborts the request). The server also watches for the caller disconnecting (checked every 0.5 s) and stops the search then, so a closed page no longer keeps the slot busy until the time limit. Whether Vercel passes the disconnect on to the function was not checked.
+- Pause never saves anything, and `run_id` is optional (the development test page does not send it).
+
+One request returns its result; there is no background-job queue or polling API. The search budget is `scheduling.solver.max_time_seconds` (60 seconds since 13 November 2026, after briefly being 280 seconds the same day; 120 seconds from 12 November; 10 seconds before); database loading, model construction, and result verification add to total request time. This is not a guaranteed HTTP deadline. Per-process capacity does not coordinate multiple server processes or reserve booking resources. A durable job workflow can be introduced if realistic workloads require it.
 
 ## Response contract
 
@@ -59,6 +65,7 @@ One request returns its result; there is no background-job queue or polling API.
 | `diagnostics`, `candidate_failures` | Structured explanations where available, without private attendee lists |
 | `statistics` | Actual search options, elapsed/search time, and solver statistics |
 | `quality_optimized` | `true` when the configured preferences produced the returned timetable (since 12 November 2026) |
+| `stopped` | `true` when an admin paused the search (Pause, or the page closed) before its time limit; see Pause above (since 13 November 2026) |
 | `quality` | Measurements of a complete timetable (idle minutes, longest day, seat use, auditorium classes); `null` otherwise. See [timetable quality](timetable-quality.md) |
 | `scope`, `intake_id`, `intake_ids`, `group_number` | `intake`, `intake_group` or `intakes` (several); the intake UUID when exactly one was selected (otherwise `null`); every selected intake, sorted; optional group number |
 | `unplaced` | Classes that cannot be placed in any room at any time, with course code/name/type, intake, group and readable reasons (built from `candidate_failures`; added 12 November 2026) |

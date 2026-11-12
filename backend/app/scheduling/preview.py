@@ -29,7 +29,7 @@ from ..student import Supabase, SupabaseWriteError
 from ..observability import REQUEST_ID, event, safe_frames
 from .loader import SchedulingDataError, SchedulingSnapshot, load_scheduling_snapshot
 from .save import MAX_PLACEMENTS, SavedClass, SavePlacement, SaveRejected, SaveResult, prepare_rows
-from .solver import ClassPlacement, ScheduleResult, solve_weekly_schedule
+from .solver import ClassPlacement, ScheduleResult, StopSignal, solve_weekly_schedule
 
 ASSETS = Path(__file__).resolve().parent / "development"
 # Admin-only development test page (also requires development mode and a direct localhost connection).
@@ -49,6 +49,8 @@ class GenerationRequest(BaseModel):
     group_number: int | None = Field(default=None, gt=0, strict=True,
                                      description="Optional group within intake_id; omit for all its groups. "
                                                  "Not allowed with intake_ids.")
+    run_id: UUID | None = Field(default=None, description="Chosen by the page (a random UUID) so that the same admin "
+                                                          "can pause this run with POST /api/schedules/generate/stop.")
 
     @field_validator("week_start", mode="before")
     @classmethod
@@ -87,6 +89,16 @@ class GenerationRequest(BaseModel):
         single = intakes[0] if len(intakes) == 1 else None
         scope = "intakes" if single is None else "intake" if self.group_number is None else "intake_group"
         return {"scope": scope, "intake_id": single, "intake_ids": list(intakes), "group_number": self.group_number}
+
+
+class StopRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    run_id: UUID = Field(description="run_id sent with the generate request")
+
+
+class StopResult(BaseModel):
+    stopped: bool = Field(description="True when this server is running that preview and has told it to stop. "
+                                      "The generate request then returns soon with stopped=true.")
 
 
 class SaveRequest(GenerationRequest):
@@ -194,6 +206,9 @@ def create_preview_router(settings: Settings) -> APIRouter:
     # One slot covers loading, solving, verification and response construction.
     # Per process; this is deliberately not a distributed job system.
     slots = anyio.CapacityLimiter(1)
+    # Previews running in this process that can be paused: run_id -> (admin profile id, signal).
+    # Per process like the slot; a stop request that reaches another instance finds nothing.
+    runs: dict[UUID, tuple[str, StopSignal]] = {}
 
     async def development_access(request: Request):
         if settings.app.environment != "development":
@@ -236,7 +251,8 @@ def create_preview_router(settings: Settings) -> APIRouter:
                     "between classes) are always enforced; the configured preferences (student idle time, lecturer idle time, "
                     "room fit) then rank valid timetables, and the result includes quality measurements. Never saves bookings.",
     )
-    async def generate(body: GenerationRequest, request: Request, response: Response):
+    async def generate(body: GenerationRequest, request: Request, response: Response,
+                       admin: SessionUser = Depends(admin_access)):
         response.headers["Cache-Control"] = "no-store"
         try:
             slots.acquire_nowait()
@@ -244,6 +260,17 @@ def create_preview_router(settings: Settings) -> APIRouter:
             error = failure(429, "GENERATION_BUSY", "Another preview is being generated. Try again shortly.")
             error.headers["Retry-After"] = "2"
             raise error
+        stop = StopSignal()
+        if body.run_id is not None:
+            runs[body.run_id] = (admin.profile_id, stop)
+
+        async def watch_for_stop():
+            # Pause (stop endpoint) or a closed page (client disconnected) ends the search early.
+            # Repeated because CP-SAT can miss a stop sent just as a search starts.
+            while True:
+                await anyio.sleep(0.5)
+                if stop.requested or await request.is_disconnected():
+                    stop.request()
         # A disconnected/cancelled caller must not free capacity while its worker
         # is still solving. run_sync also waits for its worker by default.
         with anyio.CancelScope(shield=True):
@@ -253,10 +280,19 @@ def create_preview_router(settings: Settings) -> APIRouter:
                 snapshot = select_scope(snapshot, body.intakes, body.group_number)
                 event("snapshot_loaded", stage="solve", pending_count=len(snapshot.pending_requirements))
                 event("solver_started", stage="solve")
-                result = await anyio.to_thread.run_sync(solve_weekly_schedule, snapshot, settings.scheduling.solver,
-                                                        settings.scheduling.quality)
+                solve_error = None
+                async with anyio.create_task_group() as watchers:
+                    watchers.start_soon(watch_for_stop)
+                    try:
+                        result = await anyio.to_thread.run_sync(solve_weekly_schedule, snapshot, settings.scheduling.solver,
+                                                                settings.scheduling.quality, stop)
+                    except Exception as exc:  # re-raised below, so it is not wrapped in an ExceptionGroup
+                        solve_error = exc
+                    watchers.cancel_scope.cancel()
+                if solve_error is not None:
+                    raise solve_error
                 event("solver_completed", status=result.status, placement_count=len(result.placements),
-                      duration_ms=round(result.statistics.elapsed_seconds * 1000, 2))
+                      duration_ms=round(result.statistics.elapsed_seconds * 1000, 2), stopped=result.stopped)
                 if result.status == "MODEL_INVALID":
                     raise failure(500, "MODEL_INVALID", "The scheduling model could not be processed.")
                 requirements = {item.occurrence_id: item for item in snapshot.requirements}
@@ -296,7 +332,27 @@ def create_preview_router(settings: Settings) -> APIRouter:
                 event("generation_failed", level=logging.ERROR, exception_type=type(exc).__name__, frames=safe_frames(exc))
                 raise failure(500, "GENERATION_FAILED", "The preview could not be verified or generated. No bookings were saved.") from exc
             finally:
+                if body.run_id is not None and runs.get(body.run_id, (None, None))[1] is stop:
+                    del runs[body.run_id]
                 slots.release()
+
+    @router.post(
+        "/api/schedules/generate/stop", response_model=StopResult, dependencies=[Depends(same_site)],
+        responses={code: {"model": PreviewError} for code in (401, 403)},
+        summary="Pause a running preview (admin)",
+        description="Asks the preview started with this run_id by the same admin to stop searching. That generate "
+                    "request then returns the best complete timetable found so far, or none, with stopped=true. "
+                    "stopped=false means this server is not running it (finished already, another admin's run, or "
+                    "another server instance); the page then stops waiting instead. Never saves bookings.",
+    )
+    async def stop_generation(body: StopRequest, response: Response, admin: SessionUser = Depends(admin_access)):
+        response.headers["Cache-Control"] = "no-store"
+        owner, signal = runs.get(body.run_id, (None, None))
+        if signal is None or owner != admin.profile_id:
+            return StopResult(stopped=False)
+        signal.request()
+        event("generation_stop_requested", stage="solve")
+        return StopResult(stopped=True)
 
     @router.post(
         "/api/schedules/save", status_code=201, response_model=SaveResult, dependencies=admin_only,
