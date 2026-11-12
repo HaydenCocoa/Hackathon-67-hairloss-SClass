@@ -9,6 +9,18 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+
+
+def default_config_path() -> Path:
+    """`Config/config.json` at the repository root is the only source of truth.
+
+    A Vercel deployment bundles only `backend/`, so its build step copies that
+    same file to `backend/Config/config.json` (see vercel.json). The repository
+    copy wins whenever it exists, so local runs never read a stale build copy."""
+    primary = PROJECT_ROOT / "Config" / "config.json"
+    bundled = BACKEND_ROOT / "Config" / "config.json"
+    return bundled if not primary.is_file() and bundled.is_file() else primary
 
 
 class SettingsModel(BaseModel):
@@ -83,6 +95,7 @@ class Settings(SettingsModel):
     scheduling: SchedulingSettings
 
 
-def load_settings(path: Path = PROJECT_ROOT / "Config" / "config.json") -> Settings:
+def load_settings(path: Path | None = None) -> Settings:
     # Fail at startup with a useful validation error if required config is invalid.
+    path = path if path is not None else default_config_path()
     return Settings.model_validate(json.loads(path.read_text(encoding="utf-8")))
