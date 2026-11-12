@@ -1,3 +1,4 @@
+import asyncio
 import os
 import httpx
 from datetime import date, datetime, timedelta, timezone
@@ -13,6 +14,22 @@ MY_TZ = timezone(timedelta(hours=8))
 
 # A class that is still going ahead. "rescheduled" = it was moved at least once.
 ACTIVE_STATUSES = ("scheduled", "rescheduled")
+
+# Timetable rules, used both to check a move and to choose the times that are suggested.
+WORK_ISO_DAYS = (1, 2, 3, 4, 5)        # Monday to Friday
+OPEN_MIN, CLOSE_MIN = 8 * 60, 18 * 60  # a class starts at 08:00 or later and ends by 18:00
+STEP_MIN = 30                          # suggested start times are every 30 minutes
+GAP = timedelta(minutes=15)            # between classes of the same room, lecturer or students
+ROOM_TYPES = {                         # which room types a course type may use
+    "lecture": ("classroom", "auditorium"),
+    "tutorial": ("classroom",),
+    "lab": ("lab",),
+}
+DEFAULT_ROOM_TYPES = ("classroom", "auditorium")
+
+
+def allowed_room_types(course_type: str) -> tuple:
+    return ROOM_TYPES.get(course_type, DEFAULT_ROOM_TYPES)
 
 
 def day_start_utc(day: date) -> str:
@@ -35,6 +52,7 @@ class SessionDetail(BaseModel):
     student_count: int
     duration_minutes: int
     required_room_type: str
+    allowed_room_types: List[str] = []
     status: str
     moved: bool = False
     can_reschedule: bool = True
@@ -92,16 +110,23 @@ def utc_text(moment: datetime) -> str:
     return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def span_text(start: str, end: str) -> str:
-    return f"{parse_ts(start).astimezone(MY_TZ):%H:%M}–{parse_ts(end).astimezone(MY_TZ):%H:%M}"
+async def without_removed(db: "Supabase", rows: list[dict]) -> list[dict]:
+    """Leave out classes that were removed (class_sessions.removed_at is set); they no longer occupy anything."""
+    ids = [str(r["id"]) for r in rows if r.get("id")]
+    if not ids:
+        return rows
+    gone = await db.get("class_sessions", [("select", "id"), ("removed_at", "not.is.null"), ("id", f"in.({','.join(ids)})")])
+    removed = {str(g["id"]) for g in gone}
+    return [r for r in rows if str(r.get("id")) not in removed]
 
 
-OWNED_SELECT = "id,lecturer_id,status,starts_at,room_id,section_id,intake_id,group_number,duration_minutes"
+OWNED_SELECT = "id,lecturer_id,status,starts_at,room_id,section_id,intake_id,group_number,duration_minutes,course_type"
 
 
 async def get_own_session(db: "Supabase", lecturer_id: str, session_id: str) -> dict:
     """The class, if it exists, belongs to this lecturer and has not been cancelled."""
     rows = await db.get("class_session_details", [("select", OWNED_SELECT), ("id", f"eq.{session_id}")])
+    rows = await without_removed(db, rows)
     if not rows:
         raise HTTPException(404, {"message": "Class not found.", "conflicts": []})
     if str(rows[0].get("lecturer_id")) != lecturer_id:
@@ -129,38 +154,37 @@ async def load_students(db: "Supabase", moving: dict) -> tuple[list[str], set]:
     return student_ids, groups
 
 
-# Suggested times are offered between 08:00 and 19:00, every 30 minutes.
-DAY_START_MIN, DAY_END_MIN, STEP_MIN = 8 * 60, 19 * 60, 30
-
-
 async def suggest_slots(db: "Supabase", moving: dict, lecturer_id: str, wanted_day: date, wanted_min: int,
                         flex_days: int, limit: int) -> list[dict]:
     """Free slots near the requested day and time, best first: no room, lecturer or student clash,
-    and a room of the right type and size. Same rules as find_conflicts, worked out in one pass."""
+    and a room of the right type and size. Follows the same rules as lecturer_reschedule_class."""
     now = datetime.now(timezone.utc)
     duration = timedelta(minutes=moving["duration_minutes"])
     current_start = parse_ts(moving["starts_at"])
     days = [(offset, wanted_day + timedelta(days=offset)) for offset in range(-flex_days, flex_days + 1)]
-    days = [(o, d) for o, d in days if day_start_utc_dt(d + timedelta(days=1)) > now]
+    days = [(o, d) for o, d in days if d.isoweekday() in WORK_ISO_DAYS and day_start_utc_dt(d + timedelta(days=1)) > now]
     if not days:
         return []
     range_start = day_start_utc_dt(days[0][1])
     range_end = day_start_utc_dt(days[-1][1] + timedelta(days=1))
 
     student_ids, groups = await load_students(db, moving)
-    room_filter = [("select", "id,name,building,capacity,room_type"), ("is_active", "eq.true")]
+    kinds = allowed_room_types(moving["course_type"])
+    room_filter = [("select", "id,name,building,capacity,room_type"), ("is_active", "eq.true"),
+                   ("room_type", f"in.({','.join(kinds)})")]
     rooms = [r for r in await db.get("rooms", room_filter) if r["capacity"] >= len(student_ids)]
     rooms.sort(key=lambda r: (r["capacity"], r["name"]))  # the smallest room that fits first
     if not rooms:
         return []
 
-    window = [("starts_at", f"lt.{utc_text(range_end)}"), ("ends_at", f"gt.{utc_text(range_start)}")]
+    window = [("starts_at", f"lt.{utc_text(range_end + GAP)}"), ("ends_at", f"gt.{utc_text(range_start - GAP)}")]
     sessions = await db.get("class_session_details", [
-        ("select", "room_id,lecturer_id,intake_id,group_number,starts_at,ends_at"),
+        ("select", "id,room_id,lecturer_id,intake_id,group_number,starts_at,ends_at"),
         ("status", f"in.({','.join(ACTIVE_STATUSES)})"),
         ("id", f"neq.{moving['id']}"),
         *window,
     ])
+    sessions = await without_removed(db, sessions)
     meetings = await db.get("meeting_sessions", [
         ("select", "id,room_id,lecturer_id,starts_at,ends_at"), ("status", "eq.scheduled"), *window,
     ])
@@ -184,12 +208,12 @@ async def suggest_slots(db: "Supabase", moving: dict, lecturer_id: str, wanted_d
 
     candidates = []
     for offset, day in days:
-        for minute in range(DAY_START_MIN, DAY_END_MIN - moving["duration_minutes"] + 1, STEP_MIN):
+        for minute in range(OPEN_MIN, CLOSE_MIN - moving["duration_minutes"] + 1, STEP_MIN):
             start = datetime.combine(day, datetime.min.time(), tzinfo=MY_TZ) + timedelta(minutes=minute)
             end = start + duration
             if start <= now or start == current_start:
                 continue
-            clashing = [b for b in busy if b[0] < end and start < b[1]]
+            clashing = [b for b in busy if b[0] < end + GAP and start < b[1] + GAP]  # 15 minutes either side
             if any(b[3] or b[4] for b in clashing):
                 continue  # the lecturer or the students are busy
             taken = {b[2] for b in clashing}
@@ -216,47 +240,88 @@ async def suggest_slots(db: "Supabase", moving: dict, lecturer_id: str, wanted_d
     return chosen
 
 
+# One move at a time per backend process, so two requests cannot both pass the checks for the same room.
+# (With several workers, or another program writing bookings, a clash can still slip through.)
+RESCHEDULE_LOCK = asyncio.Lock()
+
+
+def span_text(start: str, end: str) -> str:
+    return f"{parse_ts(start).astimezone(MY_TZ):%H:%M}–{parse_ts(end).astimezone(MY_TZ):%H:%M}"
+
+
+def refuse(status: int, message: str, conflicts: list | None = None) -> HTTPException:
+    return HTTPException(status, {"message": message, "conflicts": conflicts or []})
+
+
+async def auth_user_id(db: "Supabase", session: SessionUser, lecturer_id: str) -> str:
+    """The auth.users id to record in schedule_changes.changed_by (the person who made the change)."""
+    for name in ("user_id", "auth_user_id"):
+        value = getattr(session, name, None)
+        if value:
+            return str(value)
+    rows = await db.get("lecturers", [("select", "auth_user_id"), ("id", f"eq.{lecturer_id}")])  # the lecturer's own login
+    if rows and rows[0].get("auth_user_id"):
+        return str(rows[0]["auth_user_id"])
+    raise refuse(409, "This lecturer's account is not linked to a login yet, so the change cannot be recorded.")
+
+
 async def find_conflicts(db: "Supabase", moving: dict, lecturer_id: str, room_id: str,
                          new_start: datetime, new_end: datetime) -> list[dict]:
-    """Every reason the class cannot go to this room and time. An empty list means it is free."""
-    conflicts: list[dict] = []
-    session_id = moving["id"]
+    """Raises 422 if the time or room breaks a rule; otherwise returns every clash (empty = free)."""
+    local_start, local_end = new_start.astimezone(MY_TZ), new_end.astimezone(MY_TZ)
+    if local_start.isoweekday() not in WORK_ISO_DAYS:
+        raise refuse(422, "Classes run Monday to Friday only.")
+    start_min = local_start.hour * 60 + local_start.minute
+    end_min = local_end.hour * 60 + local_end.minute
+    if start_min < OPEN_MIN or local_end.date() != local_start.date() or end_min > CLOSE_MIN:
+        raise refuse(422, f"Classes must start at {OPEN_MIN // 60:02d}:00 or later and finish by {CLOSE_MIN // 60:02d}:00. "
+                          f"This one would run {local_start:%H:%M} – {local_end:%H:%M}.")
 
-    # --- the room itself: exists, in use, right type, big enough (checked once we know the group size)
     rooms = await db.get("rooms", [("select", "id,name,capacity,room_type,is_active"), ("id", f"eq.{room_id}")])
     if not rooms or not rooms[0].get("is_active"):
-        raise HTTPException(409, {"message": "That room is not available.", "conflicts": []})
+        raise refuse(422, "That room is not available.")
     room = rooms[0]
-
-    # --- the students: everyone in this class's intake and group, and every group they belong to
+    kinds = allowed_room_types(moving["course_type"])
+    if room["room_type"] not in kinds:
+        raise refuse(422, f"A {moving['course_type']} class cannot use {room['name']} (a {room['room_type']} room). "
+                          f"Use: {' or '.join(kinds)}.")
     student_ids, groups = await load_students(db, moving)
-
-    # Room type is not checked: the live class_sections table has no required_room_type column.
     if student_ids and room["capacity"] < len(student_ids):
-        conflicts.append({"type": "room", "message": f"{room['name']} seats {room['capacity']}, but this group has {len(student_ids)} students."})
+        raise refuse(422, f"{room['name']} seats {room['capacity']}, but this group has {len(student_ids)} students.")
+    if new_start == parse_ts(moving["starts_at"]) and str(moving.get("room_id")) == room_id:
+        raise refuse(422, "Nothing has changed. Pick a different time or room.")
 
-    # --- other classes that overlap the new time: starts before we end and ends after we start
-    window = [("starts_at", f"lt.{utc_text(new_end)}"), ("ends_at", f"gt.{utc_text(new_start)}")]
+    # Anything that overlaps the new time, or is within 15 minutes of it on either side.
+    conflicts: list[dict] = []
+    window = [("starts_at", f"lt.{utc_text(new_end + GAP)}"), ("ends_at", f"gt.{utc_text(new_start - GAP)}")]
+
+    def clash(kind: str, subject_overlap: str, subject_near: str, label: str, starts: str, ends: str) -> None:
+        overlaps = parse_ts(starts) < new_end and new_start < parse_ts(ends)
+        text = subject_overlap if overlaps else subject_near
+        conflicts.append({"type": kind, "message": text.format(label=label, when=span_text(starts, ends))})
+
     others = await db.get("class_session_details", [
         ("select", "id,room_id,lecturer_id,intake_id,group_number,course_code,course_type,starts_at,ends_at"),
         ("status", f"in.({','.join(ACTIVE_STATUSES)})"),
-        ("id", f"neq.{session_id}"),
+        ("id", f"neq.{moving['id']}"),
         *window,
     ])
+    others = await without_removed(db, others)
     for other in others:
-        label = f"{other['course_code']} {other['course_type']} ({span_text(other['starts_at'], other['ends_at'])})"
+        label = f"{other['course_code']} {other['course_type']}"
+        args = (label, other["starts_at"], other["ends_at"])
         if other.get("room_id") and str(other["room_id"]) == room_id:
-            conflicts.append({"type": "room", "message": f"{room['name']} is already booked for {label}."})
+            clash("room", f"{room['name']} is already booked for {{label}} ({{when}}).",
+                  f"{room['name']} is used for {{label}} ({{when}}); leave at least 15 minutes between classes.", *args)
         if str(other["lecturer_id"]) == lecturer_id:
-            conflicts.append({"type": "lecturer", "message": f"You already have {label}."})
+            clash("lecturer", "You already have {label} ({when}).",
+                  "You have {label} ({when}); leave at least 15 minutes between classes.", *args)
         if (str(other["intake_id"]), other["group_number"]) in groups:
-            conflicts.append({"type": "student", "message": f"Students in this group already have {label}."})
+            clash("student", "Students in this group already have {label} ({when}).",
+                  "Students in this group have {label} ({when}); leave at least 15 minutes between classes.", *args)
 
-    # --- meetings that overlap (a lecturer meeting uses a room, the lecturer and some students)
     meetings = await db.get("meeting_sessions", [
-        ("select", "id,room_id,lecturer_id,starts_at,ends_at"),
-        ("status", "eq.scheduled"),
-        *window,
+        ("select", "id,room_id,lecturer_id,starts_at,ends_at"), ("status", "eq.scheduled"), *window,
     ])
     attendees: set[str] = set()
     if meetings and student_ids:
@@ -267,27 +332,17 @@ async def find_conflicts(db: "Supabase", moving: dict, lecturer_id: str, room_id
         ])
         attendees = {str(r["meeting_id"]) for r in rows}
     for meeting in meetings:
-        label = f"a meeting ({span_text(meeting['starts_at'], meeting['ends_at'])})"
+        args = ("a meeting", meeting["starts_at"], meeting["ends_at"])
         if meeting.get("room_id") and str(meeting["room_id"]) == room_id:
-            conflicts.append({"type": "room", "message": f"{room['name']} is already booked for {label}."})
+            clash("room", f"{room['name']} is already booked for {{label}} ({{when}}).",
+                  f"{room['name']} is used for {{label}} ({{when}}); leave at least 15 minutes between classes.", *args)
         if str(meeting["lecturer_id"]) == lecturer_id:
-            conflicts.append({"type": "lecturer", "message": f"You already have {label}."})
+            clash("lecturer", "You already have {label} ({when}).",
+                  "You have {label} ({when}); leave at least 15 minutes between classes.", *args)
         if str(meeting["id"]) in attendees:
-            conflicts.append({"type": "student", "message": f"Some students in this group are in {label}."})
+            clash("student", "Some students in this group are in {label} ({when}).",
+                  "Some students in this group have {label} ({when}); leave at least 15 minutes between classes.", *args)
     return conflicts
-
-
-async def auth_user_id(db: "Supabase", session: SessionUser, lecturer_id: str) -> str:
-    """The auth.users id to record in schedule_changes.changed_by (the person who made the change)."""
-    for name in ("user_id", "auth_user_id"):
-        value = getattr(session, name, None)
-        if value:
-            return str(value)
-    # Fallback: the lecturer's own login, stored on lecturers.auth_user_id.
-    rows = await db.get("lecturers", [("select", "auth_user_id"), ("id", f"eq.{lecturer_id}")])
-    if rows and rows[0].get("auth_user_id"):
-        return str(rows[0]["auth_user_id"])
-    raise HTTPException(500, "Cannot log the change: no auth user id for this account.")
 
 
 def create_lecturer_router(settings: SupabaseSettings) -> APIRouter:
@@ -334,7 +389,7 @@ def create_lecturer_router(settings: SupabaseSettings) -> APIRouter:
             if last_day:
                 query_params.append(("starts_at", f"lt.{day_start_utc(last_day + timedelta(days=1))}"))
 
-            data = await db.get("class_session_details", query_params)
+            data = await without_removed(db, await db.get("class_session_details", query_params))
 
             results = []
             now_utc = datetime.now(timezone.utc)
@@ -365,7 +420,8 @@ def create_lecturer_router(settings: SupabaseSettings) -> APIRouter:
                 "group_number": s["group_number"],
                 "student_count": 30,
                 "duration_minutes": s["duration_minutes"],
-                "required_room_type": s.get("required_room_type", "classroom"),
+                "required_room_type": allowed_room_types(s["course_type"])[0],
+                "allowed_room_types": list(allowed_room_types(s["course_type"])),
                 "status": s["status"],
                 "moved": s["status"] == "rescheduled",
                 "can_reschedule": s["status"] in ACTIVE_STATUSES and starts_dt > now_utc.astimezone(MY_TZ)
@@ -408,62 +464,56 @@ def create_lecturer_router(settings: SupabaseSettings) -> APIRouter:
                                  session: SessionUser = Depends(LECTURER_OR_ADMIN)):
         check_own_lecturer(session, lecturer_id)
         db = Supabase(settings, request.app.state.http_client)
-        # The class must belong to this lecturer; otherwise anyone could move any class.
-        moving = await get_own_session(db, lecturer_id, session_id)
-
         try:
             new_start = datetime.combine(date.fromisoformat(payload.session_date),
                                          datetime.strptime(payload.start_time, "%H:%M").time(), tzinfo=MY_TZ)
         except ValueError:
-            raise HTTPException(422, {"message": "Choose a valid date and time.", "conflicts": []})
-        if new_start <= datetime.now(timezone.utc):
-            raise HTTPException(409, {"message": "Choose a start time in the future.", "conflicts": []})
-        new_end = new_start + timedelta(minutes=moving["duration_minutes"])
+            raise refuse(422, "Choose a valid date and time.")
 
-        # Room, lecturer and student checks: refuse before anything is changed.
-        conflicts = await find_conflicts(db, moving, lecturer_id, payload.room_id, new_start, new_end)
-        if conflicts:
-            raise HTTPException(409, {"message": "That slot clashes with another booking.", "conflicts": conflicts})
+        async with RESCHEDULE_LOCK:  # check, move and log as one step (within this process)
+            moving = await get_own_session(db, lecturer_id, session_id)  # exists, is theirs, not cancelled
+            now = datetime.now(timezone.utc)
+            if parse_ts(moving["starts_at"]) <= now:
+                raise refuse(409, "Classes that have already started cannot be rescheduled.")
+            if new_start <= now:
+                raise refuse(409, "Choose a start time in the future.")
+            new_end = new_start + timedelta(minutes=moving["duration_minutes"])
 
-        new_starts_at = f"{payload.session_date}T{payload.start_time}:00+08:00"
-        changed_by = await auth_user_id(db, session, lecturer_id)
-        old = moving
-        old_values = {"starts_at": old.get("starts_at"), "room_id": old.get("room_id"), "status": old.get("status")}
-        new_values = {"starts_at": new_starts_at, "room_id": payload.room_id, "status": "rescheduled"}
+            conflicts = await find_conflicts(db, moving, lecturer_id, payload.room_id, new_start, new_end)
+            if conflicts:
+                raise refuse(409, "That slot clashes with another booking.", conflicts)
 
-        session_url = f"{db.url}/rest/v1/class_sessions?id=eq.{session_id}"
-        log_url = f"{db.url}/rest/v1/schedule_changes"
-        log_row = {
-            "class_session_id": session_id,
-            "changed_by": changed_by,
-            "action": "reschedule",
-            "reason": payload.reason,
-            "old_values": old_values,
-            "new_values": new_values,
-        }
+            changed_by = await auth_user_id(db, session, lecturer_id)
+            old_values = {"starts_at": moving.get("starts_at"), "room_id": moving.get("room_id"), "status": moving.get("status")}
+            new_values = {"starts_at": new_start.isoformat(), "room_id": payload.room_id, "status": "rescheduled"}
+            session_url = f"{db.url}/rest/v1/class_sessions?id=eq.{session_id}"
+            log_row = {
+                "class_session_id": session_id, "changed_by": changed_by, "action": "reschedule",
+                "reason": payload.reason, "old_values": old_values, "new_values": new_values,
+            }
 
-        # 1) move the class and mark it rescheduled
-        try:
-            res = await db.client.patch(session_url, headers=db.headers, json=new_values)
-        except Exception as e:
-            raise HTTPException(500, f"Failed to update: {str(e)}")
-        if res.status_code not in [200, 204]:
-            print("Supabase Error:", res.text)
-            raise HTTPException(500, "Failed to update session")
-
-        # 2) write the log row; if that fails, put the class back so the timetable and the log never disagree
-        try:
-            log = await db.client.post(log_url, headers=db.headers, json=log_row)
-            if log.status_code not in [200, 201, 204]:
-                print("Supabase Error:", log.text)
-                raise RuntimeError(f"log insert returned {log.status_code}")
-        except Exception as e:
+            # 1) move the class and mark it rescheduled
             try:
-                await db.client.patch(session_url, headers=db.headers, json=old_values)
-            except Exception as undo_error:
-                print("Could not undo the reschedule:", undo_error)
-            raise HTTPException(500, f"Failed to log the change, so nothing was changed: {str(e)}")
+                res = await db.client.patch(session_url, headers=db.headers, json=new_values)
+            except Exception as e:
+                raise HTTPException(500, f"Failed to update: {str(e)}")
+            if res.status_code not in [200, 204]:
+                print("Supabase Error:", res.text)
+                raise HTTPException(500, f"Failed to update session ({res.text[:300]})")
+
+            # 2) write the history row; if that fails put the class back, so the timetable and the log agree
+            try:
+                log = await db.client.post(f"{db.url}/rest/v1/schedule_changes", headers=db.headers, json=log_row)
+                if log.status_code not in [200, 201, 204]:
+                    print("Supabase Error:", log.text)
+                    raise RuntimeError(f"log insert returned {log.status_code}: {log.text[:300]}")
+            except Exception as e:
+                try:
+                    await db.client.patch(session_url, headers=db.headers, json=old_values)
+                except Exception as undo_error:
+                    print("Could not undo the reschedule:", undo_error)
+                raise HTTPException(500, f"Failed to log the change, so nothing was changed: {str(e)}")
 
         return {"status": "ok"}
 
-    return router
+    return router

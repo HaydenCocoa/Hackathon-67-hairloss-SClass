@@ -34,8 +34,6 @@
   padding: 10px 24px; border-bottom: 1px solid var(--lc-line); background: #fff;
 }
 .lecturer .lc-brand { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.lecturer .lc-back { color: var(--lc-blue-d); font-weight: 500; padding: 6px 10px; border-radius: 999px; }
-.lecturer .lc-back:hover { background: var(--lc-blue-tint); }
 .lecturer .lc-wordmark { font-size: 24px; font-weight: 500; letter-spacing: -.5px; }
 .lecturer .lc-c0 { color: var(--lc-blue); } .lecturer .lc-c1 { color: var(--lc-red); }
 .lecturer .lc-c2 { color: var(--lc-yellow); } .lecturer .lc-c3 { color: #34a853; }
@@ -89,6 +87,9 @@
 .lecturer .lc-chip-view { background: var(--lc-yellow-tint); color: var(--lc-yellow-d); margin-left: auto; }
 .lecturer .lc-chip-moved { background: var(--lc-yellow-tint); color: var(--lc-yellow-d); margin-left: 4px; }
 .lecturer .lc-chip-cancelled { background: var(--lc-red-tint); color: var(--lc-red-d); margin-left: 4px; }
+.lecturer .lc-chip-demo { background: #fff; color: var(--lc-muted); border: 1px dashed var(--lc-line); }
+.lecturer .lc-chip-good { background: var(--lc-green-tint); color: var(--lc-green-d); }
+.lecturer .lc-chip-close { background: var(--lc-blue-tint); color: var(--lc-blue-ink); }
 
 /* --- toolbar and states --- */
 .lecturer .lc-toolbar { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-bottom: 16px; }
@@ -171,6 +172,24 @@
 .lecturer .lc-form-error ul { margin: 6px 0 0; padding-left: 18px; }
 .lecturer .lc-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 
+/* --- reschedule steps and recommended slots --- */
+.lecturer .lc-step { font-size: 12px; font-weight: 500; color: var(--lc-blue-d); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 12px; }
+.lecturer .lc-asked { margin-bottom: 12px; display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.lecturer .lc-slots { border: 0; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 8px; max-height: min(46vh, 380px); overflow-y: auto; }
+.lecturer .lc-slotpick {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 10px 14px; cursor: pointer;
+  border: 1px solid var(--lc-line); border-radius: var(--lc-radius); background: #fff;
+}
+.lecturer .lc-slotpick:hover { background: var(--lc-surface); }
+.lecturer .lc-slotpick.is-picked { border-color: var(--lc-blue-d); background: var(--lc-blue-tint); box-shadow: 0 0 0 1px var(--lc-blue-d); }
+.lecturer .lc-slotpick:has(input:focus-visible) { outline: 3px solid var(--lc-blue); outline-offset: 2px; }
+.lecturer .lc-slotpick-day { display: flex; flex-direction: column; align-items: center; width: 44px; line-height: 1.15; }
+.lecturer .lc-slotpick-dow, .lecturer .lc-slotpick-mon { font-size: 11px; font-weight: 500; text-transform: uppercase; color: var(--lc-muted); letter-spacing: .5px; }
+.lecturer .lc-slotpick-dom { font-size: 20px; font-weight: 500; }
+.lecturer .lc-slotpick-body { display: flex; flex-direction: column; flex: 1; min-width: 140px; }
+.lecturer .lc-slotpick-time { font-weight: 500; }
+.lecturer .lc-slotpick-room { font-size: 12px; color: var(--lc-muted); }
+
 /* --- toast --- */
 .lecturer .lc-toast {
   position: fixed; left: 24px; bottom: 24px; background: #323232; color: #fff; padding: 12px 20px;
@@ -196,3 +215,7 @@
   .lecturer .lc-chip-view { margin-left: 0; }
   .lecturer .lc-toast { left: 16px; right: 16px; }
 }
+
+/* Field-level prompt for a date or time outside the opening days and hours */
+.lecturer .lc-field-error { margin: 6px 0 0; color: var(--lc-red-d, #b3261e); font-size: 0.85rem; }
+.lecturer .lc-field input[aria-invalid="true"] { border-color: var(--lc-red, #d93025); }
