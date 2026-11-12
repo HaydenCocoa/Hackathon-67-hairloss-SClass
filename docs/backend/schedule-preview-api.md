@@ -45,7 +45,7 @@ The backend reads and validates the complete week's source data through several 
 4. Reuse the solver's complete-result and conflict verification. An internal verification failure must never become a successful preview.
 5. Return a typed response with safe diagnostics. Keep the operation read-only and document it in FastAPI `/docs`.
 
-One request returns its result; there is no background-job queue or polling API. The search budget is `scheduling.solver.max_time_seconds` (120 seconds since 12 November 2026; 10 seconds before); database loading, model construction, and result verification add to total request time. This is not a guaranteed HTTP deadline. Per-process capacity does not coordinate multiple server processes or reserve booking resources. A durable job workflow can be introduced if realistic workloads require it.
+One request returns its result; there is no background-job queue or polling API. The search budget is `scheduling.solver.max_time_seconds` (280 seconds since 13 November 2026, so a whole request takes at most about 5 minutes; 120 seconds from 12 November; 10 seconds before); database loading, model construction, and result verification add to total request time. This is not a guaranteed HTTP deadline. Per-process capacity does not coordinate multiple server processes or reserve booking resources. A durable job workflow can be introduced if realistic workloads require it.
 
 ## Response contract
 

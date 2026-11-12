@@ -50,7 +50,7 @@ async function call(url, { method = 'GET', body } = {}) {
 export const listIntakes = async () => (await call('/api/admin/intakes')).data
 export const listLecturers = async () => (await call('/api/admin/lecturers')).data
 
-/** Can take up to about two minutes: the solver's time limit plus loading. */
+/** Can take up to about five minutes: the solver's 280 s limit plus loading and checking. */
 export const generatePreview = (week, intakeIds) => call('/api/schedules/generate', { method: 'POST', body: generateBody(week, intakeIds) })
 
 export const savePreview = (preview) => call('/api/schedules/save', { method: 'POST', body: saveBody(preview) })

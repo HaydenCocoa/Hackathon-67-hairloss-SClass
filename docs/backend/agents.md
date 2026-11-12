@@ -402,7 +402,7 @@ Historical discussion; superseded by the implementation record below after the u
   - Confirm the two interpretations (gap scope, capacity-based auditorium rule).
   - Decide whether to add a "fewer days on campus" preference.
   - Check preview time on hosting.
-- **Time limit raised (12 November 2026):** at the user's request `scheduling.solver.max_time_seconds` is now 120 s (was 10 s). An unlimited value is not supported (0 and infinity are rejected at startup). With preferences on, a preview can take up to about 2 minutes plus loading time, holding the one-at-a-time slot.
+- **Time limit raised (12 November 2026):** at the user's request `scheduling.solver.max_time_seconds` is now 120 s (was 10 s). **Raised again to 280 s on 13 November 2026** (see that entry). An unlimited value is not supported (0 and infinity are rejected at startup). With preferences on, a preview can take up to about 2 minutes plus loading time, holding the one-at-a-time slot.
 
 ## `main` merge repair — 12 November 2026
 
@@ -631,6 +631,20 @@ Historical discussion; superseded by the implementation record below after the u
     - The plan script stops if other CS(CYB) modules still have plans. The removal script still covers all 41 modules, so it also clears the old version.
     - Real solver on a synthetic copy of the week (same 80 students, `seed_rooms.sql` rooms, configured settings): OPTIMAL, 36/36 placed in 91 s, no idle time. The plan test now passes 33 checks. Not run on hosted Supabase.
   - Details: [CS(CYB) course seed](cyb-course-seed.md#teaching-plans).
+- **Removing other sample students (13 November 2026, user request):**
+  - [supabase/remove_students_except_cyb_se.sql](../../supabase/remove_students_except_cyb_se.sql) keeps only the students of the three CS(CYB) intakes and `APU1F2611CS(SE)` (confirmed instead of the `APD1F2611CS(SE)` first written).
+  - On the sample data it removes 880 students and 1,200 memberships, leaving 120.
+  - It stops if a kept intake is missing, or if a student to be removed has a login link.
+  - Undo by rerunning `seed_students.sql`.
+  - 20 checks passed locally; not run on hosted Supabase. Details: [CS(CYB) course seed](cyb-course-seed.md#removing-the-other-sample-students).
+- **Hosted state after the user's run and intake rename (13 November 2026):**
+  - The user ran the scripts on hosted Supabase, renamed the CYB intakes and removed the other intakes.
+  - Read-only queries confirmed four intakes: `APD1F2611CS(CYB)` (was `APD1F2407CS(CYB)`), `APD2F2611CS(CYB)` (was `APD2F2506CS(CYB)`), `APD3F2611CS(CYB)` (was `APD3F2609CS(CYB)`) and `APU1F2611CS(SE)`.
+  - Students: 121 (one without an intake) with 280 memberships.
+  - Courses: 85, including a stray test course `ur mom` with no offering. 88 offerings.
+  - Plans: 42, of which 36 are CS(CYB) and 6 SE. Class sessions: 8, all SE.
+  - **The CS(CYB) scripts and `seed_students.sql` still use the old codes.** Do not rerun `seed_courses_cyb.sql` or `seed_students.sql`. The other scripts stop or do nothing until their codes are updated.
+  - Documentation only; no data changed. Table: [hosted state](cyb-course-seed.md#hosted-database-state--13-november-2026).
 - **Assumptions to confirm:** Year 3 module abbreviations are made up. Year 1/2 lecture+lab versus lecture+tutorial is inferred. Both Year 3 electives are included. Semesters are not stored. Details and the Year 3 teaching weeks: [CS(CYB) course seed](cyb-course-seed.md).
 - **Verification:** new `supabase/tests/courses-cyb.test.cjs` passed 39 checks on PGlite, run on both the legacy schema and the schema without the room column. `courses.test.cjs` still passes 20. Not run on hosted Supabase.
 
@@ -693,3 +707,20 @@ Historical discussion; superseded by the implementation record below after the u
   - Frontend: `lecturer.test.js` 30/30, after updating three tests that encoded 08:00 and "labs only a lab".
   - Full backend suite: 406 passed, 10 failed, 1 skipped. Only the 10 older loader/preview failures remain; the two lecturer failures from `main` are fixed. Other PGlite suites still pass (`rescheduled-status` 33, `save-audit` 46). Frontend unit tests all pass and `npm run build` succeeds.
   - Not run against hosted Supabase or on Vercel; the lecturer page was not opened in a browser.
+
+## Scheduling time limit of 5 minutes — 13 November 2026
+
+- **Requirement (user):** "expand the configuration to let the system allows up to 5 minute on scheduling".
+- **Decision (user, 13 November 2026):** the **whole** scheduling request should take at most 5 minutes, on any Vercel plan. The alternative was a 300 s search plus `maxDuration` 360 s in `vercel.json`, which needs Vercel Pro (Hobby is capped at 300 s).
+- **Change:**
+  - `Config/config.json` `scheduling.solver.max_time_seconds` is now **280** (was 120). That leaves about 20 s of Vercel's 300 s function limit for loading the week, building the model and checking the result.
+  - `/admin/schedule` now says a preview "can take up to about five minutes".
+  - The docs were updated: timetable quality, preview API, CP-SAT, README and [Vercel deployment](vercel-deployment.md#scheduling-on-vercel-since-12-november-2026).
+  - `vercel.json` is unchanged.
+- **Effect:**
+  - With preferences on, a preview usually runs for the whole limit. It now waits up to about 4 min 40 s for the search, and holds the one-at-a-time slot (`GENERATION_BUSY`) for that long.
+  - Saving is not affected; it does not run the solver.
+- **Limits:**
+  - If loading the week from Supabase takes longer than about 20 s, Vercel stops the request at 300 s. The page then shows the `SERVER_TIMEOUT` message.
+  - Vercel notes that idle HTTP/1.1 connections may be closed by network layers during long requests. Not checked on the live site.
+- **Verification:** the configuration loads with the new value (`load_settings()`), and the preview tests pass. Not run on Vercel.

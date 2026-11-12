@@ -33,7 +33,7 @@ Configure `scheduling.solver` in `Config/config.json`:
 
 ```json
 "solver": {
-  "max_time_seconds": 120,
+  "max_time_seconds": 280,
   "num_search_workers": 1,
   "random_seed": 0
 }

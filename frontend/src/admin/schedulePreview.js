@@ -138,6 +138,22 @@ export function filterChoices(rows, kind) {
 
 export const matchesFilter = (row, kind, value) => value === 'all' || String(row[filterKey[kind]]) === String(value)
 
+/** Groups of one intake ("Group 1", "Group 2", ...) with how many classes each has; none when intake is 'all'. */
+export function groupChoices(rows, intakeId) {
+  if (intakeId === 'all') return []
+  const groups = new Map()
+  for (const row of rows) {
+    if (String(row.intake_id) !== String(intakeId)) continue
+    const key = String(row.group_number)
+    const entry = groups.get(key) || { value: key, label: `Group ${row.group_number}`, count: 0 }
+    entry.count += 1
+    groups.set(key, entry)
+  }
+  return [...groups.values()].sort((a, b) => Number(a.value) - Number(b.value))
+}
+
+export const matchesGroup = (row, group) => group === 'all' || String(row.group_number) === String(group)
+
 /** "Week of 16 – 22 Nov 2026" */
 export const weekTitle = (monday) => `Week of ${weekLabel(monday)}`
 

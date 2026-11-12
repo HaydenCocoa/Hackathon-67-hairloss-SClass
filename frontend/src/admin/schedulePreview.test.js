@@ -2,7 +2,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
-  errorAdvice, filterChoices, generateBody, keepsPreview, matchesFilter, outcome, placementRows, rowsByDay, saveBody,
+  errorAdvice, filterChoices, generateBody, groupChoices, keepsPreview, matchesFilter, matchesGroup, outcome, placementRows,
+  rowsByDay, saveBody,
   selectionKey, summaryCards, weekTitle,
 } from './schedulePreview.js'
 
@@ -78,6 +79,26 @@ test('rows are sorted, labelled in campus time, filtered and grouped by day', ()
   assert.equal(rows.filter((r) => matchesFilter(r, 'lecturer', 'all')).length, 2)
   assert.deepEqual(rowsByDay(rows, '2026-11-16').map((d) => [d.iso, d.rows.length]), [['2026-11-16', 1], ['2026-11-17', 1]])
   assert.equal(weekTitle('2026-11-16'), 'Week of 16 – 22 Nov 2026')
+})
+
+test('an intake can be narrowed to one of its groups', () => {
+  const rows = placementRows(preview({ placements: [
+    placement(1, '2026-11-16', '08:30', '10:30', { group_number: 2 }),
+    placement(2, '2026-11-16', '11:00', '12:00', { group_number: 1 }),
+    placement(3, '2026-11-17', '09:00', '10:00', { group_number: 2 }),
+    placement(4, '2026-11-17', '13:00', '14:00', { group_number: 10 }),
+    placement(5, '2026-11-18', '09:00', '10:00', { intake_id: 'I2', group_number: 3 }),
+  ] }))
+  // Only the chosen intake's groups, in number order (10 after 2), with their class counts.
+  assert.deepEqual(groupChoices(rows, 'I1'), [
+    { value: '1', label: 'Group 1', count: 1 }, { value: '2', label: 'Group 2', count: 2 }, { value: '10', label: 'Group 10', count: 1 },
+  ])
+  assert.deepEqual(groupChoices(rows, 'I2').map((g) => g.label), ['Group 3'])
+  assert.deepEqual(groupChoices(rows, 'all'), []) // no group choice until an intake is chosen
+  const shown = (intake, group) => rows.filter((r) => matchesFilter(r, 'intake', intake) && matchesGroup(r, group)).map((r) => r.course_code)
+  assert.deepEqual(shown('I1', '2'), ['CT001', 'CT003'])
+  assert.deepEqual(shown('I1', 'all'), ['CT001', 'CT002', 'CT003', 'CT004'])
+  assert.deepEqual(shown('I2', 'all'), ['CT005'])
 })
 
 // ---------- scheduleApi.js against a fake fetch ----------

@@ -260,7 +260,10 @@ def test_invalid_search_settings_fail_validation(changes):
 
 
 def test_search_options_are_configurable_and_recorded(snapshot):
-    assert load_settings().scheduling.solver.max_time_seconds == 120  # raised from 10 s on 12 November 2026
+    # 10 s, then 120 s (12 November 2026), then 280 s (13 November 2026): the whole request must end
+    # within Vercel's 300 s function limit (Hobby maximum), leaving about 20 s for loading and checking.
+    configured = load_settings().scheduling.solver.max_time_seconds
+    assert configured == 280 and configured <= 300 - 20
     options = SolverSettings(max_time_seconds=2, num_search_workers=1, random_seed=7)
     result = solve_weekly_schedule(snapshot, options)
     assert result.has_solution

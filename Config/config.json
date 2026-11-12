@@ -32,7 +32,7 @@
     "min_gap_minutes": 15,
     "reserved_room_types": ["auditorium"],
     "solver": {
-      "max_time_seconds": 120,
+      "max_time_seconds": 280,
       "num_search_workers": 1,
       "random_seed": 0
     },
