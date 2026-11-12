@@ -47,7 +47,7 @@ Later requests: cookie → FastAPI asks Supabase /auth/v1/user (cached 60 s) →
 | `/student` | → `/login?next=/student` | Students only; others → own home |
 | `/lecturer` | → `/login?next=/lecturer` | Lecturers only; others → own home |
 | `/admin` | → `/login?next=/admin` | Admins only; others → own home |
-| `/admin/schedule` | → `/login?next=/admin/schedule` | Admins only; others → own home. Scheduling workspace opened from Admin > Timetable > Schedule Class (added 12 November 2026; placeholder for now) |
+| `/admin/schedule` | → `/login?next=/admin/schedule` | Admins only; others → own home. Scheduling workspace opened from Admin > Timetable > Schedule Class (added 12 November 2026). Its generate/save calls also need development mode and localhost |
 | `/admin/development/scheduling-test-hayden` | → `/login?next=…` | Admins only (plus development mode and localhost) |
 
 The backend applies these rules when a page is loaded directly; the Vue app repeats them for the Vite dev server and in-app navigation. If any API call returns 401 later (session expired), the app sends the user to `/login` and back afterwards. A thin bar above each page shows the user's name, role and a **Log out** button.

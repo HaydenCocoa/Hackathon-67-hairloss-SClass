@@ -95,12 +95,20 @@ export const sortRooms = (rooms) => [...rooms].sort((a, b) => a.name.localeCompa
  * Returns { days: { [iso]: event[] }, firstHour, lastHour }.
  */
 export function layoutWeek(sessions, roomId, monday) {
+  return layoutEvents(sessions, monday, (session) => Boolean(roomId) && String(session.room_id) === String(roomId))
+}
+
+/**
+ * Any items with starts_at/ends_at (classes or preview placements) for which keep(item) is true,
+ * grouped by campus day of the week starting at monday, with lanes for overlaps.
+ */
+export function layoutEvents(items, monday, keep = () => true) {
   const dayIsos = new Set(Array.from({ length: 7 }, (_, i) => addDays(monday, i)))
   const days = Object.fromEntries([...dayIsos].map((iso) => [iso, []]))
   let first = DEFAULT_FIRST_HOUR * 60
   let last = DEFAULT_LAST_HOUR * 60
-  for (const session of sessions) {
-    if (!roomId || String(session.room_id) !== String(roomId)) continue
+  for (const session of items) {
+    if (!keep(session)) continue
     const start = campusParts(session.starts_at)
     if (!dayIsos.has(start.date)) continue
     const end = campusParts(session.ends_at)
