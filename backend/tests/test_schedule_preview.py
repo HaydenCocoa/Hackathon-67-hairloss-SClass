@@ -14,7 +14,8 @@ from backend.app.scheduling import preview
 from backend.app.scheduling.solver import ScheduleVerificationError
 from backend.tests.test_scheduling_loader import provider, sql_payload, uid
 
-ADMIN = SessionUser(role="admin", name="Test Admin", profile_id="00000000-0000-0000-0000-0000000000ad", home="/admin")
+ADMIN = SessionUser(role="admin", name="Test Admin", profile_id="00000000-0000-0000-0000-0000000000ad", home="/admin",
+                    auth_user_id="00000000-0000-0000-0000-0000000000a5")
 WEEK = {"week_start": "2026-11-09", "intake_id": uid(1)}
 BASE = "http://127.0.0.1:8000"
 

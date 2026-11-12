@@ -188,7 +188,7 @@ confirmButton.addEventListener("click", async () => {
     closeConfirm();
     saveButton.disabled = true;
     saveButton.textContent = "Saved";
-    status(`Saved ${data.saved_count} ${data.saved_count === 1 ? "class" : "classes"} to the timetable.` + (requestId ? ` Request ID: ${requestId}` : ""), "success");
+    status(`Saved ${data.saved_count} ${data.saved_count === 1 ? "class" : "classes"} to the timetable, recorded as saved by ${data.saved_by}.` + (requestId ? ` Request ID: ${requestId}` : ""), "success");
   } catch (error) {
     closeConfirm();
     if (error.code === "GENERATION_BUSY") {

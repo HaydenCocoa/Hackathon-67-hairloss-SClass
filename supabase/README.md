@@ -129,6 +129,8 @@ The historical [migrations/202611100003_scheduling_snapshot.sql](migrations/2026
 
 Class sessions accept `scheduled`, `rescheduled` (an active class moved by a lecturer/admin) and `cancelled`. On an existing database, apply [migrations/202611120001_class_session_rescheduled_status.sql](migrations/202611120001_class_session_rescheduled_status.sql) once **after** the teaching-requirement migration below; a fresh setup also needs it after that migration. See [rescheduled status](../docs/backend/rescheduled-status.md).
 
+The step 10 save audit needs [migrations/202611120002_save_audit.sql](migrations/202611120002_save_audit.sql), applied once **after** the teaching-requirement migration (and after the `rescheduled` migration when following this order). It adds `class_sessions.created_by`, allows the `create` action in `schedule_changes`, and adds a trigger that writes one `create` row per class saved by the app. Run it **before** deploying the backend that sets `created_by`; otherwise saves return `AUDIT_NOT_INSTALLED`. See [save audit](../docs/backend/save-audit.md).
+
 Weekly demand is available through [migrations/202611100001_teaching_requirements.sql](migrations/202611100001_teaching_requirements.sql). Apply it **once after the base schema** (or the existing membership/age upgrades); do not rerun the initial schema. It works whether the optional `202611100002_remove_required_room_type.sql` patch has been applied or not. It adds `teaching_plans`, `teaching_occurrences`, an optional occurrence link on `class_sessions`, and the `teaching_occurrence_details` view without using the legacy room field. Existing data is retained. See [setup and usage](../docs/backend/weekly-teaching-plans.md).
 
 Create a plan for each lecture/lab section with its first Monday, number of weeks, and occurrences per week. Plan insertion creates required lessons without assigning times or rooms. The SQL Editor and trusted server role can maintain these records; application users retain read-only access. No hosted migration or production teaching-plan data has been applied by this task.
@@ -159,6 +161,7 @@ node supabase/tests/teaching-requirements.test.cjs
 node supabase/tests/room-type-removal.test.cjs
 node supabase/tests/scheduling-snapshot.test.cjs
 node supabase/tests/rescheduled-status.test.cjs
+node supabase/tests/save-audit.test.cjs
 ```
 
 The `rescheduled` status migration passed 33 checks (upgrade from the legacy schema and a fresh `schema.sql`); see [rescheduled status](../docs/backend/rescheduled-status.md).

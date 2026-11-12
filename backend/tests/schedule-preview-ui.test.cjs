@@ -224,7 +224,7 @@ function savingPage(saveResponse) {
 }
 
 test('save needs both confirmation steps and sends only occurrence, room and start', async () => {
-  const { dom, requests } = savingPage(() => ({ ok: true, status: 201, json: async () => ({ status: 'SAVED', saved_count: 1, saved: [] }) }));
+  const { dom, requests } = savingPage(() => ({ ok: true, status: 201, json: async () => ({ status: 'SAVED', saved_count: 1, saved_by: 'Ada Admin', saved: [] }) }));
   try {
     const document = dom.window.document;
     submit(dom);
@@ -242,6 +242,7 @@ test('save needs both confirmation steps and sends only occurrence, room and sta
     assert.equal(document.querySelector('#save-confirm-button').disabled, false);
     click(dom, '#save-confirm-button');  // step 2
     await until(() => /Saved 1 class/.test(document.querySelector('#status').textContent));
+    assert.match(document.querySelector('#status').textContent, /recorded as saved by Ada Admin\./);
     assert.equal(requests.length, 2);
     assert.equal(requests[1].url, '/api/schedules/save');
     assert.deepEqual(requests[1].body, {
@@ -372,6 +373,6 @@ test('served page saves a reviewed preview through the real backend', { skip: !p
     acknowledge(dom);
     click(dom, '#save-confirm-button');
     await until(() => /Saved|HTTP/.test(document.querySelector('#status').textContent));
-    assert.match(document.querySelector('#status').textContent, /Saved 1 class to the timetable\. Request ID: [0-9a-f]{32}/);
+    assert.match(document.querySelector('#status').textContent, /Saved 1 class to the timetable, recorded as saved by QA Admin\. Request ID: [0-9a-f]{32}/);
   } finally { dom.window.close(); }
 });

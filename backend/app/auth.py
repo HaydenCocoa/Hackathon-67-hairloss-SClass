@@ -37,6 +37,9 @@ class SessionUser(BaseModel):
     profile_id: str = Field(description="id in admins, lecturers or students")
     code: str | None = Field(default=None, description="student_code or lecturer_code")
     home: str
+    # Supabase Auth user id, used server-side for audit (schedule_changes.changed_by).
+    # Never sent to the browser.
+    auth_user_id: str = Field(exclude=True)
 
 
 class LoginRequest(BaseModel):
@@ -173,7 +176,8 @@ class SupabaseAuth:
             if rows:
                 row = rows[0]
                 return SessionUser(role=role, name=row.get("full_name") or "", email=email, profile_id=str(row["id"]),
-                                   code=row.get(code_key) if code_key else None, home=HOME[role])
+                                   code=row.get(code_key) if code_key else None, home=HOME[role],
+                                   auth_user_id=user_id)
         return None
 
 

@@ -38,7 +38,7 @@ Step 1 now adds validated scheduling settings, a reusable calendar helper, and i
 
 Step 2 adds database-defined weekly teaching plans, automatic expansion into stable occurrences, optional booking links, cancellation/move integrity, and an internal paginated weekly-demand reader. It works with or without `class_sections.required_room_type`. The user confirmed Step 2 complete on 11 November 2026. The original design was verified locally on 10 November; this record holds no automated test results for the 11 November compatibility edit. See [implemented weekly teaching plans](weekly-teaching-plans.md) for setup, interfaces, decisions, and limits.
 
-Steps 4-7 add the validated weekly snapshot, shared booking validator, unrestricted candidate ranges, and complete CP-SAT feasibility generation with post-solve verification. Step 8 quality optimization is postponed. Step 9 exposes read-only generation through a local-development HTTP API and a service-hosted test page; these are verified locally. Step 10 adds saving a reviewed preview to `class_sessions` through the same local-development API and page (see [timetable saving](timetable-saving.md)). Login with Supabase Auth and role-based access were added on 12 November ([login](login.md)); save auditing and a database-transactional commit remain future work.
+Steps 4-7 add the validated weekly snapshot, shared booking validator, unrestricted candidate ranges, and complete CP-SAT feasibility generation with post-solve verification. Step 8 quality optimization is postponed. Step 9 exposes read-only generation through a local-development HTTP API and a service-hosted test page; these are verified locally. Step 10 adds saving a reviewed preview to `class_sessions` through the same local-development API and page (see [timetable saving](timetable-saving.md)). Login with Supabase Auth and role-based access were added on 12 November ([login](login.md)), and the save audit followed the same day ([save audit](save-audit.md)); a database-transactional recheck-and-commit remains future work.
 
 The step 4 loader was changed on 11 November at the user's direction: the backend now reads existing Supabase tables/views and assembles its own scheduling input. It no longer invokes the optional historical snapshot RPC migration. Verification of these direct reads is pending; see [the updated loader record](scheduling-data-loader.md). The separate PostgREST requests are not one transaction snapshot, so any later booking write must revalidate transactionally.
 
@@ -55,9 +55,9 @@ No database schema or hosted data was changed for step 1. No frontend change was
 | 5 | Explainable room, lecturer, student, and reservation conflict validation | Complete and verified locally; no new migration |
 | 6 | Feasible start ranges and suitable rooms without preset teaching slots | Complete and verified locally; no new migration |
 | 7 | CP-SAT generation satisfying all mandatory constraints and reporting accurate solver status | Complete and verified locally; no new migration |
-| 8 | Configurable objectives for student gaps, lecturer gaps, and room utilization | Postponed by the user; future enhancement |
+| 8 | Configurable objectives for student gaps, lecturer gaps, and room utilization | Not implemented. Reviewed and planned 12 Nov ([plan](timetable-quality-plan.md)); awaiting decisions |
 | 9 | Selected-intake/group preview API and test page including assignments, diagnostics, and scope-bound input revision; quality deferred | Complete and verified locally; direct localhost/development access only |
-| 10 | Authorized, transactional commits with revalidation, concurrency control, audit, and retry protection | Save implemented and verified locally on 11 Nov (recheck-then-single-insert). Admin login required since 12 Nov ([login](login.md)); save audit still to do. Not run against hosted Supabase |
+| 10 | Authorized, transactional commits with revalidation, concurrency control, audit, and retry protection | Save implemented and verified locally on 11 Nov (recheck-then-single-insert). Admin login required since 12 Nov ([login](login.md)); save audit implemented 12 Nov ([save audit](save-audit.md)). Not run against hosted Supabase |
 | 11 | Safe rescheduling, cancellation, and fixed future reservations | Planned. `rescheduled` booking status added 12 Nov ([details](rescheduled-status.md)); hosted SQL run pending |
 | 12 | Verified requirements-to-generation-to-commit-to-retrieval workflow and acceptance scenarios | Planned |
 
@@ -305,6 +305,31 @@ Historical discussion; superseded by the implementation record below after the u
 - **Code change:** a backend service rooted at `backend/` does not deploy `Config/config.json`, so its build step copies the file into `backend/Config/`, and `default_config_path()` falls back to that copy only when the repository copy is missing. `Config/config.json` remains the single source of truth. Details and reasons: [Vercel deployment](vercel-deployment.md).
 - **Verification:** new config-path test passed; full backend suite 194 passed with the same 10 pre-existing failures and 95 errors as `main`; `npm run build` succeeded; a simulated backend-only bundle served `/api/health` and `/api/config`. `vercel dev` and a real deployment have not been run.
 - **Follow-ups:** confirm service names/public paths/bindings; set `SUPABASE_URL` and `SUPABASE_KEY` in the Vercel project; run `vercel dev` and a preview deployment; check bundle size, the SPA fallback and the cookie `Secure` flag on Vercel.
+
+## Step 10 save audit — 12 November 2026
+
+- Work done on branch `backend-enhancement` at the user's request (A7).
+- **Requirement:** with login in place, record who saved a timetable, together with the classes in one transaction (the deferred D4).
+- **Decisions (user accepted every recommendation):** a database trigger writes the audit, so the backend keeps one insert (A1); one `schedule_changes` `create` row per class (A2); inserts without an admin are allowed but not audited (A3); audited classes cannot be deleted (A4); the student endpoint ignores `create` rows (A5); the audit is viewed with SQL only (A6).
+- **Implemented:**
+  - Migration `202611120002_save_audit.sql`: `class_sessions.created_by`, `create` action, AFTER INSERT trigger.
+  - The save sends the admin's Supabase user id. `SessionUser.auth_user_id` is server-side only. The response adds `saved_by`. A missing migration returns `503 AUDIT_NOT_INSTALLED`.
+  - Student recent changes are filtered to `cancel`/`reschedule`.
+  - Details: [save audit](save-audit.md).
+- **Verification:**
+  - 46 new database checks passed.
+  - Full backend suite: 199 passed, with the same 10 failures and 97 errors as before.
+  - 19/19 page tests passed, including a real save on the QA service.
+  - Not run on hosted Supabase.
+- **Follow-ups:**
+  - The user runs the migration before deploying this backend.
+  - Lecturer reschedule auditing belongs to step 11.
+
+## Step 8 review and plan — 12 November 2026
+
+- The user asked to check step 8 (quality optimization), confirm what is done, and plan the work. Review result: none of step 8 is implemented. The solver has no objective; the preview returns `quality_optimized: false`, `quality: null`.
+- The solver tests that step 8 would extend currently error because of the stale `required_room_type` fixture.
+- Plan, risks and open decisions Q1–Q8: [timetable quality plan](timetable-quality-plan.md). Nothing implemented; awaiting the user's decisions.
 
 ## `rescheduled` class-session status — 12 November 2026
 

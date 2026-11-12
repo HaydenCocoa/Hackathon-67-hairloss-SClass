@@ -167,7 +167,7 @@ Individually valid candidates can still conflict with one another. The solver mu
 
 ## 8. Add timetable quality objectives
 
-**Status:** postponed by the user on 10 November 2026. Continue with step 9 using the existing feasibility solver. These objectives remain future work, not completed requirements.
+**Status:** postponed by the user on 10 November 2026. Reviewed on 12 November 2026: nothing implemented yet. A plan with open decisions is in [timetable quality plan](docs/backend/timetable-quality-plan.md). These objectives remain future work, not completed requirements.
 
 - [ ] Measure idle minutes between each student's first and last class per day; no mandatory breaks apply.
 - [ ] Make reducing total student waiting time the first optimization objective.
@@ -211,7 +211,7 @@ Verification status on 11 November: code and HTTP-provider fixtures were updated
 - [x] Verify the caller's permission to perform the scheduling operation: admin login required since 12 November 2026 (plus the development/localhost checks). See [login](docs/backend/login.md).
 - [x] Detect stale previews (scope-bound revision must match) and recheck current data and availability before writing. Not inside one database transaction (accepted for the hackathon).
 - [ ] Use a consistent locking strategy for all relevant booking and roster changes. Partial: saves and previews share one per-process slot, and the insert takes the existing advisory lock. Other writers (dashboard, lecturer reschedule endpoint) do not follow the save checks.
-- [ ] Save assignments and relevant audit information together in one database transaction. Assignments: done (one insert). **Audit deferred until login exists.**
+- [x] Save assignments and relevant audit information together in one database transaction. One insert; each row carries `created_by` and a trigger writes the `schedule_changes` `create` row in the same statement (12 November 2026, [save audit](docs/backend/save-audit.md)). Hosted migration run pending.
 - [x] Prevent duplicate bookings for the same teaching occurrence (unique occurrence constraint; reported as `ALREADY_SAVED`).
 - [x] Handle retries safely so repeated submissions do not duplicate assignments (a retry is `PREVIEW_STALE`; the unique constraint also blocks it).
 - [x] Reject a failed commit without leaving a partially saved timetable (single bulk insert).
@@ -286,7 +286,7 @@ All acceptance scenarios must pass before treating the scheduling backend as rea
 - [x] Move development pages under `/admin/development/` with admin login.
 - [ ] Create Supabase accounts and link `auth_user_id` for real users (project owner; steps in [login](docs/backend/login.md)).
 - [ ] Verify login against the hosted Supabase project and in a real browser.
-- [ ] Record who saved a timetable (`schedule_changes`, needs a "create" action).
+- [x] Record who saved a timetable (`schedule_changes` `create` rows; [save audit](docs/backend/save-audit.md)). Hosted migration run pending.
 
 **Complete when:** each role can log in, is limited to its own data, and every protected page redirects to `/login` when not logged in. Locally verified on 12 November; hosted verification pending.
 
