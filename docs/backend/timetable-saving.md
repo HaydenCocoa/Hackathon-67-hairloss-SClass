@@ -2,7 +2,7 @@
 
 Implemented and verified locally: 11 November 2026. **Local development, admin use only. Not run against hosted Supabase.**
 
-Related: [preview API record](schedule-preview-api.md), [backend record](agents.md), [checklist](../../task_hayden.md), [logging](scheduling-logging.md).
+Related: [preview API record](schedule-preview-api.md), [backend record](agents.md), [logging](scheduling-logging.md).
 
 ## Accepted decisions (11 November 2026)
 

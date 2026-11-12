@@ -1,5 +1,9 @@
 -- Apply to a development database after the existing schema and migrations.
 -- Cancellation removal hides a session while retaining its history.
+-- Works with or without class_sections.required_room_type (removed by 202611100002).
+-- Then apply 202611120003_admin_reschedule_fixes.sql, which replaces
+-- admin_reschedule_class below: this version still reads the removed column
+-- and does not know the 'rescheduled' status.
 begin;
 
 alter table public.class_sessions add column removed_at timestamptz;
@@ -8,10 +12,20 @@ alter table public.class_sessions add constraint removed_session_is_cancelled
   check ((removed_at is null and removed_by is null) or
          (removed_at is not null and removed_by is not null and status = 'cancelled'));
 
+-- Keep the legacy column in the view only while the table still has it, so the
+-- column list matches the existing view either way (CREATE OR REPLACE VIEW
+-- cannot drop or reorder columns).
+do $$
+declare room_column text := case when exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'class_sections' and column_name = 'required_room_type'
+  ) then ' s.required_room_type,' else '' end;
+begin
+  execute format($view$
 create or replace view public.class_session_details with (security_invoker = true) as
 select cs.id, cs.section_id, cs.room_id, cs.starts_at,
   cs.starts_at + c.duration_minutes * interval '1 minute' as ends_at,
-  cs.status, s.group_number, s.required_room_type,
+  cs.status, s.group_number,%s
   o.id as offering_id, o.intake_id, o.lecturer_id,
   c.id as course_id, c.course_code, c.name as course_name,
   c.course_type, c.duration_minutes
@@ -19,7 +33,9 @@ from public.class_sessions cs
 join public.class_sections s on s.id = cs.section_id
 join public.course_offerings o on o.id = s.offering_id
 join public.courses c on c.id = o.course_id
-where cs.removed_at is null;
+where cs.removed_at is null$view$, room_column);
+end;
+$$;
 
 -- Share the existing configuration lock for meeting changes as well.
 create trigger campus_integrity_lock before insert or update or delete on public.meeting_sessions

@@ -142,9 +142,9 @@ reset()
 </script>
 <template>
   <main class="admin-page">
-    <a href="#/">← Main menu</a><p class="eyebrow">SCLASS / ADMIN</p><h1>Manage your workspace<span>.</span></h1>
+    <p class="eyebrow">SCLASS / ADMIN</p><h1>Manage your workspace<span>.</span></h1>
     <p>Courses and user profiles</p>
-    <div class="access"><label>Admin access token <input v-model="token" type="password" autocomplete="off" placeholder="Supabase access token" /></label><button @click="demo = false; load()">Connect</button><button @click="demo = true; load()">Try local demo</button><small>{{ demo ? 'Demo data stays in this browser session.' : 'Use a signed-in administrator access token.' }}</small></div>
+    <div class="access"><label>Access token (optional) <input v-model="token" type="password" autocomplete="off" placeholder="Leave blank to use your login" /></label><button @click="demo = false; load()">Connect</button><button @click="demo = true; load()">Try local demo</button><small>{{ demo ? 'Demo data stays in this browser session.' : 'You are signed in as an administrator, so no token is needed.' }}</small></div>
     <nav><button v-for="item in ['courses', 'students', 'lecturers', 'intakes', 'timetable']" :key="item" :class="{ active: section === item }" @click="select(item)">{{ item }}</button></nav>
     <p role="status" class="notice">{{ message }}</p>
     <section v-if="section === 'timetable'" class="panel">
@@ -158,7 +158,7 @@ reset()
         <button type="submit" :disabled="savingSession">Save changes</button><button type="button" @click="editingSession = null">Cancel</button>
       </form>
       <p v-if="!rows.length">No scheduled classes in this period.</p>
-      <div v-for="row in rows" :key="row.id" class="record"><div><strong>{{ row.course_name }} · {{ row.course_code }}</strong><p>{{ new Date(row.starts_at).toLocaleString() }} – {{ new Date(row.ends_at).toLocaleString() }}</p><p>{{ row.intake?.intake_code }} · Group {{ row.group_number }} · {{ row.lecturer?.full_name || '—' }} · {{ row.room?.name || '—' }} · {{ row.status }}</p></div><div><button v-if="row.status === 'scheduled'" @click="editSession(row)">Edit</button><button v-if="row.status === 'cancelled'" @click="removeCancelled(row)">Remove</button></div></div>
+      <div v-for="row in rows" :key="row.id" class="record"><div><strong>{{ row.course_name }} · {{ row.course_code }}</strong><p>{{ new Date(row.starts_at).toLocaleString() }} – {{ new Date(row.ends_at).toLocaleString() }}</p><p>{{ row.intake?.intake_code }} · Group {{ row.group_number }} · {{ row.lecturer?.full_name || '—' }} · {{ row.room?.name || '—' }} · {{ row.status }}</p></div><div><button v-if="row.status === 'scheduled' || row.status === 'rescheduled'" @click="editSession(row)">Edit</button><button v-if="row.status === 'cancelled'" @click="removeCancelled(row)">Remove</button></div></div>
     </section>
     <div v-else class="admin-grid"><section class="panel"><h2>{{ editing ? 'Edit' : 'Add' }} {{ section.slice(0, -1) }}</h2><form @submit.prevent="save">
       <label v-for="field in fields" :key="field">{{ field.replaceAll('_', ' ') }}<select v-if="field === 'course_type'" v-model="form[field]"><option v-for="type in ['lecture', 'tutorial', 'lab', 'others']" :key="type">{{ type }}</option></select><input v-else v-model="form[field]" :type="['age', 'max_group'].includes(field) ? 'number' : 'text'" :min="field === 'age' ? 0 : 1" :required="field !== 'age'" /></label>

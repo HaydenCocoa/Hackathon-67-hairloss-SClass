@@ -2,7 +2,7 @@
 
 Implemented and verified locally: 10 November 2026. **Read-only; direct localhost access in development only.**
 
-The user postponed step 8 (timetable quality optimization), requested implementation plus a simple service-hosted page, then confirmed selected-intake/group generation and local development with authentication deferred. This supersedes the initial whole-week default. This implementation builds on the [weekly snapshot loader](scheduling-data-loader.md) and [CP-SAT feasibility solver](cp-sat-scheduling.md). Track decisions and completion in [the backend record](agents.md) and [the development checklist](../../task_hayden.md).
+The user postponed step 8 (timetable quality optimization), requested implementation plus a simple service-hosted page, then confirmed selected-intake/group generation and local development with authentication deferred. This supersedes the initial whole-week default. This implementation builds on the [weekly snapshot loader](scheduling-data-loader.md) and [CP-SAT feasibility solver](cp-sat-scheduling.md). Track decisions and completion in [the backend record](agents.md).
 
 ## Aim
 

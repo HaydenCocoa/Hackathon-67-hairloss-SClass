@@ -12,7 +12,11 @@ Status: evaluation and recommendations only. The user proposed these changes and
 | Defer public holiday and semester-break enhancements | Suitable for the initial scope | Keep the existing configurable teaching calendar and explicit closures; do not claim automatic holiday or break awareness |
 | Remove `class_sections.required_room_type` | Suitable if the system owns an explicit replacement policy | Derive allowed room types from teaching type; continue validating actual room type, capacity, active status, and availability |
 
-These recommendations are not implemented or marked as completed milestones. The precise cutoff/make-up rules and room compatibility mapping still need confirmation.
+These recommendations are not implemented or marked as completed milestones.
+
+**Decisions (12 November 2026):**
+- The room compatibility mapping was confirmed on 10 November and is in `scheduling.room_compatibility`. The required-room-type removal is prepared.
+- Course-offering end dates are **deferred by the user**: not a priority, and scheduling stays as it is. The recommendations below are kept for later; nothing was decided or implemented.
 
 ## Offering end date
 
@@ -64,7 +68,7 @@ The tradeoff is less per-section flexibility. A future specialist lab or equipme
 - [Teaching-plan migration](../../supabase/migrations/202611100001_teaching_requirements.sql): the later 11 November update removed `required_room_type` dependencies from the metadata-protection trigger and occurrence view. Offering end-date bounds remain deferred.
 - [Draft requirements loader](../../backend/app/scheduling/requirements.py): update its input/output contract and derive suitability through the shared policy rather than a mandatory section field.
 - SQL/Python fixtures, integration checks, schema upgrades, ERD documentation, and downstream readers need coordinated changes. Already-applied migrations should be followed by a new upgrade rather than rewritten.
-- [Development checklist](../../task_hayden.md): decisions are pending; implementation and verification remain unchecked.
+- [Backend record](agents.md#remaining-work): end dates deferred on 12 November 2026.
 
 ## Required verification when implemented
 
