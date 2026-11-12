@@ -8,4 +8,6 @@ Sample data: [rooms](supabase/seed_rooms.sql), [lecturers](supabase/seed_lecture
 
 Course assignments: [seed_courses.sql](supabase/seed_courses.sql) adds the Programming, Networking, and Software Engineering teaching components for `APU1F2611CS(SE)`. Run it after the lecturer seed. Each session component lasts 120 minutes, and both components of a subject use the same lecturer.
 
+CS(CYB) cohort: [seed_courses_cyb.sql](supabase/seed_courses_cyb.sql) adds the Year 1–3 modules for `APD1F2407CS(CYB)`, `APD2F2506CS(CYB)` and `APD3F2609CS(CYB)` (Internship excluded). Run it after the lecturer seed. See [the CS(CYB) course seed notes](docs/backend/cyb-course-seed.md).
+
 For an existing database, run [the student age upgrade](supabase/migrations/202611080002_student_age.sql) before the latest student seed. New projects created with `schema.sql` already include integer `age`. The seed supplies sample ages 18 through 25 for the 1,000 students.

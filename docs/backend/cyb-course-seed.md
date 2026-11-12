@@ -1,0 +1,116 @@
+# CS(CYB) course seed, years 1 to 3
+
+Date: 12 November 2026. Script: [supabase/seed_courses_cyb.sql](../../supabase/seed_courses_cyb.sql). Test: [supabase/tests/courses-cyb.test.cjs](../../supabase/tests/courses-cyb.test.cjs). Back to the [backend record](agents.md).
+
+## Requirement
+
+The user asked for course and intake data for the CS(CYB) cohort, covering the same modules their own intake takes. Year 1 and Year 2 modules come from the user's interim transcripts. Year 3 modules come from the `APD3F2609CS(CYB)` programme schedule. Internship is excluded. No student, grade or attendance data from the transcripts is stored in the seed or in this note.
+
+## What it creates
+
+| Intake | Year | Modules | Course components | Sections (2 groups) |
+| --- | --- | ---: | ---: | ---: |
+| `APD1F2407CS(CYB)` | 1 (both semesters) | 15 | 30 | 60 |
+| `APD2F2506CS(CYB)` | 2 (both semesters, no Internship) | 14 | 28 | 56 |
+| `APD3F2609CS(CYB)` | 3 (both semesters) | 12 | 24 | 48 |
+
+- The intakes already exist from `seed_students.sql`, each with 2 groups. The seed creates a missing intake with `max_group = 2` and adds sections for groups 1 to `max_group`.
+- Every component lasts 120 minutes, the same as the existing `seed_courses.sql`.
+- Both components of a module share one lecturer. Lecturers `LEC004`–`LEC020` are assigned in turn. `LEC001`–`LEC003` are left to `APU1F2611CS(SE)`. Each Year 3 semester-1 module has its own lecturer.
+- No teaching plans or class sessions are created.
+- It works with or without `class_sections.required_room_type`. When the old column still exists, labs get `lab` and other components get `classroom`, the same as the old seed.
+- It is atomic and can be rerun. A rerun updates the names and durations of its own courses and the lecturers of its offerings, and keeps all UUIDs.
+
+## Course codes
+
+At the user's request (12 November 2026), every code is `CS101-<module>` for Year 1, `CS201-<module>` for Year 2 and `CS301-<module>` for Year 3. The module part is the transcript abbreviation for Years 1 and 2 (for example `CS101-PYP` and `CS201-OODJ`) and a short abbreviation for Year 3 (for example `CS301-VAPT`).
+
+**IN and PYP use the original Supabase courses** (user decision, 12 November 2026). The seed does not create `CS101-IN` or `CS101-PYP`. It links `APD1F2407CS(CYB)` to the existing lecture and lab rows created by `seed_courses.sql` and never changes them, so they keep "Introduction to Programming", 120 minutes and their UUIDs. `seed_courses.sql` must therefore run first; otherwise this seed stops with "Course CS101-IN (lecture) is missing" and changes nothing. Year 1 gets its own offerings (`LEC014` for IN, `LEC015` for PYP) and group sections. The `APU1F2611CS(SE)` offerings (`LEC001`, `LEC002`) stay as they are. The seed creates 78 course rows, and the other 4 are reused.
+
+## Reverting
+
+[supabase/revert_courses_cyb.sql](../../supabase/revert_courses_cyb.sql) (user request, 12 November 2026) deletes what the seed adds. It removes the cohort's class sections, its 82 intake offerings (including the Year 1 links to `CS101-IN`/`CS101-PYP`) and its 78 course rows. Run it as a whole in the SQL Editor; its final query should show `0, 0, 4`.
+
+- **Kept:**
+  - `CS101-IN`/`CS101-PYP` and everything else from `seed_courses.sql`.
+  - The three intakes and their student memberships. `seed_students.sql` owns these, so an intake that this seed created because it was missing also stays.
+  - Any course row that another intake's offering still uses.
+- **Stops and deletes nothing** if a class session or teaching plan already uses one of the cohort's sections. Saved timetables and plans have audit and identity rules, so the revert does not remove them silently.
+- It is atomic and can be rerun.
+
+## Assumptions to confirm
+
+- **Year 3 module abbreviations are made up**, because the programme schedule lists module names only.
+- **Year 3 teaching types follow the schedule:** L/T becomes lecture + tutorial, L/LAB becomes lecture + lab, and T/LAB (IoT) becomes tutorial + lab.
+- **Year 1 and 2 teaching types are not on the transcripts.** Hands-on programming and networking modules are lecture + lab: PYP, IN, IOOP, OODJ, SNA, CTF, SRE, WAPP and DSTR. All other modules, including MPU modules and Co-Curricular 2, are lecture + tutorial.
+- **Both Year 3 electives are included:** Cloud Infrastructure and Services, and Internet of Things. The schema assumes that every member of an intake/group attends every course of that intake, so both electives count for all students.
+- **Semesters are not stored.** The schema has no semester field. If a whole intake is scheduled without teaching plans, the modules from both of its semesters are treated as one week's demand. Teaching plans (first Monday, number of weeks) are what separate the semesters.
+
+## Teaching plans
+
+Added 12 November 2026 at the user's request:
+
+- [supabase/seed_teaching_plans_cyb.sql](../../supabase/seed_teaching_plans_cyb.sql) adds the plans.
+- [supabase/remove_teaching_plans_cyb.sql](../../supabase/remove_teaching_plans_cyb.sql) removes them.
+- Test: [supabase/tests/teaching-plans-cyb.test.cjs](../../supabase/tests/teaching-plans-cyb.test.cjs).
+
+**User decisions:**
+- All three intakes get plans in the **same weeks**. That covers all 41 modules from both semesters of each year, in every group.
+- **14 consecutive weeks**; breaks are not skipped.
+- **1 lesson a week** for each lecture, tutorial or lab of each group.
+- The start Monday was not specified. The script uses **Mon 16 Nov 2026**, so the last lesson week starts 15 Feb 2027. Change `first_monday` at the top of the script to use another Monday.
+
+**What the plan script does:**
+- Gives each cohort section one plan: 164 plans with 2 groups. The database then creates 2,296 required lessons (60/840, 56/784 and 48/672 per intake).
+- Assigns no times, rooms or class sessions; Generate Preview on `/admin/schedule` places them.
+- Stops if the migration `202611100001_teaching_requirements.sql` or the CS(CYB) courses are missing. It also stops if a section already has a different plan.
+- Adds nothing when rerun.
+
+**Cannot be fully scheduled.** `seed_students.sql` puts the same 80 students in all three intakes. In every one of the 14 weeks, each student would have 82 two-hour classes (164 h) inside 47.5 open hours. Generate Preview for these intakes will report that the classes cannot all be placed. The user accepted this after being warned. Before the user chose, the warning quoted about 92 h a week; that figure counted only Semester 1 modules.
+
+**The removal script:**
+- Deletes every plan and lesson on the cohort's sections. It keeps courses, offerings, sections, intakes and other intakes' plans.
+- **Deliberate exception:** the database normally refuses to delete a lesson ("cancel instead of deleting its identity"). The script switches off only the `validate_teaching_occurrence` trigger, and only inside its own transaction. It switches it back on before the transaction ends, so other sessions never see it off.
+- Stops, deleting nothing, if any class session is linked to one of these lessons, because a saved timetable keeps its lesson history.
+- Its final query shows `0, 0, O`; `O` means the protection is back on.
+
+**Undo order:** run `remove_teaching_plans_cyb.sql` first, then `revert_courses_cyb.sql`. The course revert refuses while plans exist.
+
+**Verification:** 27 checks passed (PGlite, mocked Supabase Auth). They ran on the schema after the hosted migrations: teaching requirements, room-column removal, `rescheduled` status and save audit. Covered:
+
+- missing migration or missing courses;
+- counts per intake;
+- 16 Nov 2026 start, 14 weeks, 1 a week, last week 15 Feb 2027;
+- 164 lessons waiting in the first week, with no class sessions created;
+- rerun adds nothing, and an existing different plan stops the script;
+- removal blocked by a linked class session;
+- removal keeps another intake's plan, and deleting a lesson is still refused afterwards;
+- rerunning the removal;
+- the full undo order.
+
+The existing `teaching-requirements` (51), `courses` (20) and `courses-cyb` (75) suites still pass. Not run on hosted Supabase.
+
+## Year 3 calendar teaching weeks (reference, not used by the plan script)
+
+These are the teaching weeks from the programme schedule, with the break weeks left out. A plan covers consecutive weeks, so each block would be a separate plan for each section:
+
+- Semester 1: 14 Sep–8 Nov 2026 (8 weeks), 16 Nov–20 Dec 2026 (5 weeks), 4–10 Jan 2027 (1 week).
+- Semester 2: 15 Feb–7 Mar 2027 (3 weeks), 15 Mar–25 Apr 2027 (6 weeks), 3 May–6 Jun 2027 (5 weeks).
+
+## Verification
+
+`node supabase/tests/courses-cyb.test.cjs`: **75 checks passed**. These include 22 revert checks: blocked by a class session, and by a teaching plan, with nothing deleted; a clean revert; `seed_courses.sql` rows, the `APU1F2611CS(SE)` offerings and the intakes kept; rerunning the revert; and keeping a course another intake uses. 53 seed checks passed before the revert was added (PGlite, mocked Supabase Auth). Both scenarios run `seed_courses.sql` first: one on the legacy `schema.sql`, the other followed by the teaching-requirement and room-column-removal migrations. The checks cover:
+
+- rollback when a lecturer is missing, and when `CS101-IN`/`CS101-PYP` are missing;
+- CS101/CS201/CS301 codes by year;
+- 78 new course rows; the existing `CS101-IN`/`CS101-PYP` rows unchanged and linked to Year 1; the `APU1F2611CS(SE)` offerings unchanged;
+- counts per intake;
+- 120-minute components;
+- Internship excluded;
+- one lecturer per module;
+- Year 3 component types;
+- legacy room types;
+- no sessions created;
+- unchanged IDs after a rerun.
+
+The existing `courses.test.cjs` still passes (20 checks). The seed has not been run on hosted Supabase.
