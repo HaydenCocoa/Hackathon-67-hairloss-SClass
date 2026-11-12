@@ -108,7 +108,7 @@ def create_app(settings: Settings | None = None, frontend_dist: Path | None = No
             return index_file()
         app.get(path, include_in_schema=False)(page)
 
-    for role, path in (("student", "/student"), ("lecturer", "/lecturer"), ("admin", "/admin")):
+    for role, path in (("student", "/student"), ("lecturer", "/lecturer"), ("admin", "/admin"), ("admin", "/admin/schedule")):
         role_page(path, role)
 
     if (frontend_dist / "assets").is_dir():

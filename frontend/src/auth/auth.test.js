@@ -36,6 +36,8 @@ test('after login, `next` is followed only inside the user\'s own area', () => {
   assert.equal(landingFor(student, '//evil.example'), '/student')
   assert.equal(landingFor(admin, '/admin/development/scheduling-test-hayden'), '/admin/development/scheduling-test-hayden')
   assert.equal(landingFor(admin, '/administrator'), '/admin')  // prefix must be a path segment
+  assert.equal(landingFor(admin, '/admin/schedule'), '/admin/schedule')
+  assert.equal(landingFor(student, '/admin/schedule'), '/student')
 })
 
 test('old hash links map to the new pages', () => {
@@ -44,7 +46,7 @@ test('old hash links map to the new pages', () => {
   assert.equal(legacyHashTarget('#main'), '/')
   assert.equal(legacyHashTarget('#/'), '/')
   assert.equal(legacyHashTarget('#section-2'), null)
-  assert.deepEqual(ROLE_PAGES, { '/student': 'student', '/lecturer': 'lecturer', '/admin': 'admin' })
+  assert.deepEqual(ROLE_PAGES, { '/student': 'student', '/lecturer': 'lecturer', '/admin': 'admin', '/admin/schedule': 'admin' })
 })
 
 test('navigate updates the reactive path and back/forward is followed', () => {

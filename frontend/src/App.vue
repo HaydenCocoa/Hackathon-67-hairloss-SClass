@@ -1,12 +1,13 @@
 <script setup>
 // App shell: routing + login. Every page except /login needs a logged-in user;
-// each role is sent to its own page (/student, /lecturer, /admin).
+// each role is sent to its own page (/student, /lecturer, /admin; admins also /admin/schedule).
 // The student and lecturer pages themselves are unchanged (owned by their teams).
 import { computed, ref, watch } from 'vue'
 import { getJson } from './api'
 import LoginPage from './auth/LoginPage.vue'
 import { loadSession, logout, session } from './auth/session'
 import AdminPage from './admin/AdminPage.vue'
+import SchedulePage from './admin/SchedulePage.vue'
 import LecturerPage from './lecturer/LecturerPage.vue'
 import { ROLE_PAGES, landingFor, legacyHashTarget, navigate, path } from './router'
 import StudentPage from './student/StudentPage.vue'
@@ -22,7 +23,9 @@ const roleLabel = computed(() => ({ admin: 'Administrator', lecturer: 'Lecturer'
 const page = computed(() => {
   if (!checked.value) return 'loading'
   if (path.value === '/login') return 'login'
-  if (session.value && ROLE_PAGES[path.value] === session.value.role) return session.value.role
+  if (session.value && ROLE_PAGES[path.value] === session.value.role) {
+    return path.value === '/admin/schedule' ? 'schedule' : session.value.role
+  }
   return 'loading' // a redirect is on its way
 })
 
@@ -70,7 +73,7 @@ async function signOut() {
 watch(path, resolve, { immediate: true })
 window.addEventListener('hashchange', resolve)
 watch([page, appName], ([name, app]) => {
-  const titles = { login: 'Log in', student: 'Student timetable', lecturer: 'Lecturer timetable', admin: 'Admin' }
+  const titles = { login: 'Log in', student: 'Student timetable', lecturer: 'Lecturer timetable', admin: 'Admin', schedule: 'Schedule classes' }
   document.title = titles[name] ? `${app} · ${titles[name]}` : app
 }, { immediate: true })
 </script>
@@ -90,6 +93,7 @@ watch([page, appName], ([name, app]) => {
     <StudentPage v-if="page === 'student'" :student-code="session.code || ''" />
     <LecturerPage v-else-if="page === 'lecturer'" :app-name="appName" />
     <AdminPage v-else-if="page === 'admin'" />
+    <SchedulePage v-else-if="page === 'schedule'" />
   </template>
 </template>
 

@@ -487,3 +487,33 @@ Historical discussion; superseded by the implementation record below after the u
   - what breaks without them.
 
   Also added the read-only status query [hosted-migrations-status.sql](hosted-migrations-status.sql). It was checked on local PostgreSQL (PGlite) before and after applying all five. Its first version wrongly reported `rescheduled` as applied on a fresh `schema.sql`, so it now also checks the trigger function. Nothing was run on hosted Supabase.
+
+## Admin room timetable and `/admin/schedule` page — 12 November 2026
+
+- Work done on branch `feature-admin-room-timetable`, created from `main` (after PR #17).
+- **Requirement:** this is the first step of moving the development scheduling page into the admin page.
+  - Admin > Timetable shows one room's classes for one week (Monday to Sunday) as a calendar, with the room picked from a drop-down. Saturday and Sunday are greyed.
+  - Below the calendar, a green **Schedule Class** button opens `/admin/schedule` in a new tab.
+  - For now that page only shows a dialog saying it is under development.
+  - White interface with Google colours.
+- **User decisions:**
+  - Only the Timetable tab was to be changed. The user approved touching `router.js`, `App.vue`, `backend/app/main.py` and the existing routing tests for the new page.
+  - The calendar **replaces** the Timetable tab's old date-range list. Its Edit (reschedule) and Remove (cancelled class) buttons are gone from the page. The `PUT` and `DELETE /api/admin/timetable/{id}` endpoints and their database functions are unchanged.
+- **Implemented:**
+  - `frontend/src/admin/RoomTimetable.vue` (calendar) and `roomCalendar.js` (pure helpers).
+  - Calendar data:
+    - It uses the existing `GET /api/admin/timetable/rooms` and `GET /api/admin/timetable` for the whole campus week (Monday 00:00 to Monday 00:00, `+08:00`), filtered by the selected room in the browser.
+    - Times are shown in `Asia/Kuala_Lumpur`.
+    - Overlapping classes sit side by side. Cancelled classes are grey and struck through; rescheduled classes show "Moved".
+    - The hour range is 8 AM–7 PM and grows for earlier or later bookings.
+    - Demo mode uses the page's demo data.
+  - `AdminPage.vue`: the Timetable tab renders the calendar. The old list, its state and its edit/remove functions were removed.
+  - `SchedulePage.vue`: placeholder dialog.
+  - `router.js` and `App.vue`: `/admin/schedule` is an admin page.
+  - `main.py`: serves `/admin/schedule` with the same login and role redirects as `/admin`.
+- **No API or database change.** Meetings are not shown, because the admin timetable API returns classes only.
+- **Verification:**
+  - New `roomCalendar.test.js`: 7 tests pass (weeks, weekend, campus time zone, room filter, hour range, overlap lanes, labels).
+  - Login/routing 7/7 and lecturer 12/12 frontend tests pass; `npm run build` succeeds.
+  - Backend `test_auth.py` and `test_app.py`: 42 passed, 1 skipped, including new `/admin/schedule` page and redirect checks.
+  - Visual check in headless Edge against a temporary local server with synthetic data and a fake admin session (no Supabase), at 1280 px and 390 px. On a phone the calendar scrolls sideways inside its card, and the page itself does not. Not checked against hosted Supabase.
