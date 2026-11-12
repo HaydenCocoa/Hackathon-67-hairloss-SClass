@@ -1,39 +1,71 @@
 <script setup>
-// Modal form for moving one class. The end time is shown, not entered: start + the course duration.
-// The server decides whether the new slot is allowed and answers with the exact clashes if not.
+// Two steps in one modal:
+//   1. The lecturer writes when they would like to hold the class (a date, a start time and how flexible they are).
+//   2. The backend answers with free times and rooms from the timetable; the lecturer picks one and confirms.
+// The end time is never typed: it is the start time plus the course length. The server re-checks the
+// chosen slot when it is saved, so a slot taken in the meantime comes back as a clear clash message.
 import { computed, nextTick, reactive, ref, watch } from 'vue'
-import { reschedule } from './lecturerApi'
-import { endTime, formatTime, longDate } from './time'
-import { groupText, roomsFor, typeLabel } from './session'
+import { api } from './dataSource'
+import { CLOSE_TIME, OPEN_TIME, endTime, formatTime, latestStart, longDate, requestProblems } from './time'
+import { groupText, slotKey, typeLabel } from './session'
+import SlotSuggestions from './SlotSuggestions.vue'
 
 const props = defineProps({
   session: { type: Object, default: null }, // the class being moved; null keeps the dialog closed
-  rooms: { type: Array, default: () => [] },
-  roomsError: { type: String, default: '' },
   lecturerId: { type: String, default: '' },
   today: { type: String, default: '' },
 })
 const emit = defineEmits(['close', 'saved'])
 
+const FLEXIBILITY = [
+  { value: 0, label: 'Only that day' },
+  { value: 1, label: 'Up to 1 day either side' },
+  { value: 3, label: 'Up to 3 days either side' },
+  { value: 7, label: 'Up to a week either side' },
+]
+
 const dialog = ref(null)
-const form = reactive({ date: '', start: '', roomId: '', reason: '' })
-const error = ref(null) // { message, conflicts }
+const dateInput = ref(null)
+const timeInput = ref(null)
+const step = ref('request') // 'request' | 'pick'
+const form = reactive({ date: '', time: '', flex: 1, reason: '' })
+const asked = ref(null) // the request the shown slots answer: { date, time, flexDays }
+const slots = ref([])
+const picked = ref('')
+const searching = ref(false)
 const saving = ref(false)
+const error = ref(null) // { message, conflicts }
 
-const choices = computed(() => (props.session ? roomsFor(props.session, props.rooms) : []))
-const end = computed(() => (props.session ? endTime(form.start, props.session.duration_minutes) : null))
-const endLabel = computed(() => (end.value ? formatTime(end.value.hhmm) + (end.value.nextDay ? ' (next day)' : '') : '–'))
+const endHint = computed(() => (props.session ? endTime(form.time, props.session.duration_minutes) : null))
+// Date and start time must be inside the opening days and hours; otherwise a prompt appears and the next step is blocked.
+const problems = computed(() =>
+  props.session ? requestProblems(form.date, form.time, props.session.duration_minutes, props.today) : { date: '', time: '' },
+)
+const hasProblem = computed(() => !!(problems.value.date || problems.value.time))
+const latestTime = computed(() => (props.session ? latestStart(props.session.duration_minutes) : null))
+// The browser's own validity message doubles as the pop-up prompt.
+watch(problems, (p) => {
+  dateInput.value?.setCustomValidity(p.date)
+  timeInput.value?.setCustomValidity(p.time)
+}, { flush: 'post' })
+// Show the prompt as soon as a value is chosen outside the range.
+const showPrompt = (el) => nextTick(() => el?.value && !el.value.validity.valid && el.value.reportValidity())
 
-function pickDefaultRoom() {
-  if (!choices.value.some((room) => room.id === form.roomId)) form.roomId = choices.value[0]?.id ?? ''
-}
+const askedText = computed(() => {
+  if (!asked.value) return ''
+  const flex = FLEXIBILITY.find((f) => f.value === asked.value.flexDays)?.label.toLowerCase()
+  return `Around ${formatTime(asked.value.time)} on ${longDate(asked.value.date)} · ${flex}`
+})
 
 watch(
   () => props.session,
   async (session) => {
     if (session) {
-      Object.assign(form, { date: session.session_date, start: session.start_time, roomId: session.room_id || '', reason: '' })
-      pickDefaultRoom()
+      Object.assign(form, { date: session.session_date, time: session.start_time, flex: 1, reason: '' })
+      step.value = 'request'
+      slots.value = []
+      picked.value = ''
+      asked.value = null
       error.value = null
       await nextTick()
       if (!dialog.value.open) dialog.value.showModal()
@@ -42,24 +74,50 @@ watch(
     }
   },
 )
-watch(choices, () => props.session && pickDefaultRoom()) // rooms may finish loading after the dialog opens
 
-async function submit() {
-  if (!form.date || !form.start || !form.roomId) {
-    error.value = { message: 'Choose a date, start time and room.', conflicts: [] }
+async function search() {
+  if (hasProblem.value) {
+    ;(problems.value.date ? dateInput : timeInput).value?.reportValidity()
     return
   }
+  if (!form.date || !form.time) {
+    error.value = { message: 'Choose the date and start time you would like.', conflicts: [] }
+    return
+  }
+  searching.value = true
+  error.value = null
+  const request = { date: form.date, time: form.time, flexDays: Number(form.flex) }
+  try {
+    slots.value = await api.suggestSlots(props.lecturerId, props.session.id, { ...request, limit: 6 })
+    asked.value = request
+    picked.value = slots.value.length ? slotKey(slots.value[0]) : ''
+    step.value = 'pick'
+  } catch (e) {
+    error.value = { message: e.message, conflicts: e.conflicts || [] }
+  } finally {
+    searching.value = false
+  }
+}
+
+function backToRequest() {
+  error.value = null
+  step.value = 'request'
+}
+
+async function confirm() {
+  const slot = slots.value.find((s) => slotKey(s) === picked.value)
+  if (!slot) return
   saving.value = true
   error.value = null
   try {
-    await reschedule(props.lecturerId, props.session.id, {
-      session_date: form.date,
-      start_time: form.start,
-      room_id: form.roomId,
+    await api.reschedule(props.lecturerId, props.session.id, {
+      session_date: slot.session_date,
+      start_time: slot.start_time,
+      room_id: slot.room_id,
       reason: form.reason.trim() || null,
     })
     dialog.value.close()
-    emit('saved')
+    emit('saved', slot)
   } catch (e) {
     error.value = { message: e.message, conflicts: e.conflicts || [] }
   } finally {
@@ -70,7 +128,7 @@ async function submit() {
 
 <template>
   <dialog ref="dialog" class="lc-dialog" aria-labelledby="lc-dialog-title" @close="emit('close')">
-    <form v-if="session" novalidate @submit.prevent="submit">
+    <div v-if="session">
       <h2 id="lc-dialog-title">Reschedule class</h2>
       <p class="lc-current">
         <strong>{{ session.course_code }} · {{ typeLabel(session) }}</strong> · {{ session.course_name }}<br />
@@ -86,42 +144,66 @@ async function submit() {
         </ul>
       </div>
 
-      <div class="lc-field-row">
-        <div class="lc-field">
-          <label for="lc-date">New date</label>
-          <input id="lc-date" v-model="form.date" type="date" :min="today" required />
+      <!-- Step 1: when would you like it? -->
+      <form v-if="step === 'request'" novalidate @submit.prevent="search">
+        <p class="lc-step">Step 1 of 2 · When would you like to hold this class?</p>
+        <div class="lc-field-row">
+          <div class="lc-field">
+            <label for="lc-date">Move it to</label>
+            <input id="lc-date" ref="dateInput" v-model="form.date" type="date" :min="today" required
+                   :aria-invalid="!!problems.date" @change="showPrompt(dateInput)" />
+            <p v-if="problems.date" class="lc-field-error" role="alert">{{ problems.date }}</p>
+          </div>
+          <div class="lc-field">
+            <label for="lc-time">Preferred start time</label>
+            <input id="lc-time" ref="timeInput" v-model="form.time" type="time" required
+                   :min="OPEN_TIME" :max="latestTime || CLOSE_TIME" :aria-invalid="!!problems.time" @change="showPrompt(timeInput)" />
+            <p v-if="problems.time" class="lc-field-error" role="alert">{{ problems.time }}</p>
+          </div>
         </div>
-        <div class="lc-field">
-          <label for="lc-start">Start time</label>
-          <input id="lc-start" v-model="form.start" type="time" required />
-        </div>
-      </div>
-      <p class="lc-end" aria-live="polite">Ends at <strong>{{ endLabel }}</strong> ({{ session.duration_minutes }} min)</p>
-
-      <div class="lc-field">
-        <label for="lc-room">Room</label>
-        <select id="lc-room" v-model="form.roomId" required>
-          <option v-for="room in choices" :key="room.id" :value="room.id">
-            {{ room.name }} · {{ room.building }} · seats {{ room.capacity }}
-          </option>
-        </select>
-        <p v-if="!choices.length" class="lc-hint">{{ roomsError || 'No active room fits this class.' }}</p>
-        <p v-else class="lc-hint">
-          Showing {{ session.required_room_type }} rooms that seat {{ session.student_count }} students.
+        <p class="lc-end" aria-live="polite">
+          <template v-if="endHint">It would end at <strong>{{ formatTime(endHint.hhmm) }}<span v-if="endHint.nextDay"> (next day)</span></strong> ({{ session.duration_minutes }} min).</template>
+          <template v-else>Class length: {{ session.duration_minutes }} min.</template>
         </p>
-      </div>
 
-      <div class="lc-field">
-        <label for="lc-reason">Reason <span class="lc-optional">(optional)</span></label>
-        <textarea id="lc-reason" v-model="form.reason" maxlength="300" rows="2"></textarea>
-      </div>
+        <div class="lc-field">
+          <label for="lc-flex">If that exact time is not free</label>
+          <select id="lc-flex" v-model="form.flex">
+            <option v-for="f in FLEXIBILITY" :key="f.value" :value="f.value">{{ f.label }}</option>
+          </select>
+          <p class="lc-hint">We check the timetable and suggest free times and rooms nearest to your request. Classes run Monday to Friday, 08:00 to 18:00, with at least 15 minutes between classes.</p>
+        </div>
 
-      <div class="lc-actions">
-        <button type="button" class="lc-btn lc-btn-text" :disabled="saving" @click="dialog.close()">Cancel</button>
-        <button type="submit" class="lc-btn lc-btn-primary" :disabled="saving || !choices.length">
-          {{ saving ? 'Saving…' : 'Save new time' }}
-        </button>
-      </div>
-    </form>
+        <div class="lc-field">
+          <label for="lc-reason">Reason <span class="lc-optional">(optional)</span></label>
+          <textarea id="lc-reason" v-model="form.reason" maxlength="300" rows="2"></textarea>
+        </div>
+
+        <div class="lc-actions">
+          <button type="button" class="lc-btn lc-btn-text" @click="dialog.close()">Cancel</button>
+          <button type="submit" class="lc-btn lc-btn-primary" :disabled="searching || hasProblem">
+            {{ searching ? 'Checking the timetable…' : 'Find available times' }}
+          </button>
+        </div>
+      </form>
+
+      <!-- Step 2: choose one of the recommended slots -->
+      <form v-else novalidate @submit.prevent="confirm">
+        <p class="lc-step">Step 2 of 2 · Pick a time</p>
+        <p class="lc-asked">{{ askedText }} <button type="button" class="lc-btn lc-btn-text" @click="backToRequest">Change</button></p>
+
+        <SlotSuggestions v-if="slots.length" v-model="picked" :slots="slots" :request="asked" />
+        <p v-else class="lc-state">
+          No free time matches that request. Go back and try another date or allow more flexibility.
+        </p>
+
+        <div class="lc-actions">
+          <button type="button" class="lc-btn lc-btn-text" :disabled="saving" @click="backToRequest">Back</button>
+          <button type="submit" class="lc-btn lc-btn-primary" :disabled="saving || !picked">
+            {{ saving ? 'Saving…' : 'Confirm new time' }}
+          </button>
+        </div>
+      </form>
+    </div>
   </dialog>
 </template>

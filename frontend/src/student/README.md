@@ -1,6 +1,7 @@
 # Student Page (Bi Jin)
 
-Log in as a student at **http://127.0.0.1:5173/login**; students are sent to **/student**. (Old `#/student` links redirect there.)
+Log in as a student at **http://127.0.0.1:5173/login**; students are sent to **/student**. (Old `#/student` links redirect there.) 
+App.vue passes the signed-in student's code as `<StudentPage :student-code="session.code" />`.
 
 ## What it does
 
@@ -9,18 +10,19 @@ Log in as a student at **http://127.0.0.1:5173/login**; students are sent to **/
 - Cancelled classes are red and struck through; rescheduled classes get a yellow "Moved" badge. The side panel lists every cancellation and reschedule from the last 14 days.
 - Click any class for details: time, room, lecturer, intake/group, and what changed (old time/room, reason).
 - Meetings the student is invited to (`meeting_students`) appear as dashed green blocks.
-- "Try with sample data" loads a built-in demo week, so the page can be shown before real classes exist in Supabase.
+- If the login expires, the page sends the user back to `/login` and returns to `/student` afterwards.
+- If the account has no linked student record, the page says so instead of showing an empty timetable.
 
 ## Files
 
 | File | Purpose |
 | --- | --- |
-| `StudentPage.vue` | Page layout, temporary sign-in, week navigation, summary, side panel |
+| `StudentPage.vue` | Page layout, week navigation, summary, side panel |
 | `WeekTimetable.vue` | Calendar grid (handles overlapping classes side by side) |
 | `AgendaList.vue` | List view grouped by day |
 | `SessionDialog.vue` | Class / meeting details pop-up |
 | `studentApi.js` | Calls the FastAPI endpoint |
-| `demoData.js` | Sample week in the same shape as the API response |
+| `demoData.js` | Sample week in the same shape as the API response (not used by the page; kept for tests/demos) |
 | `student.css` | Theme colours (white, blue, red, yellow, green), scoped under `.sp` |
 | `../../../backend/app/student.py` | FastAPI routes (see below) |
 
@@ -33,6 +35,5 @@ Try it at http://127.0.0.1:8000/docs. The backend uses the server key from `.env
 
 ## Notes for the team
 
-- **Login (done 12 November 2026):** the backend checks the login session, so a student can only read their own profile and timetable; another student's code returns 403 (admins may read any). The page still has its own code box and "Switch" button, which can be removed in favour of `<StudentPage :student-code="signedInCode" />`. See [login](../../../docs/backend/login.md).
-- **Reschedule/cancel (Ting Ju / Edward):** when writing `schedule_changes`, put `starts_at` and `room_id` in `old_values` / `new_values` (e.g. `{"starts_at": "...", "room_id": "..."}`). The Student Page reads these keys to show "was → now". Set `class_sessions.status = 'cancelled'` for cancellations.
-- Request-a-meeting (optional feature) is not built yet: `meeting_sessions.status` only allows `scheduled`/`cancelled`, so a request/approval status or table is needed first.
+- **Login (done 12 November 2026):** the backend checks the login session, so a student can only read their own profile and timetable; another student's code returns 403 (admins may read any). 
+- The page uses the signed-in student's code; the old code box and "Switch" button have been removed. See [login](../../../docs/backend/login.md).
