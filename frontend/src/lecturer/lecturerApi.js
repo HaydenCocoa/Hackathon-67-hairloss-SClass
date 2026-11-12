@@ -38,8 +38,6 @@ async function request(path, options = {}) {
 
 export const listLecturers = () => request('/api/lecturers')
 
-export const listRooms = () => request('/api/rooms')
-
 /** Classes of the courses this lecturer teaches. start/end are inclusive "YYYY-MM-DD" dates. */
 export function getTimetable(lecturerId, { start, end } = {}) {
   const query = new URLSearchParams()
@@ -49,17 +47,11 @@ export function getTimetable(lecturerId, { start, end } = {}) {
   return request(`/api/lecturers/${encodeURIComponent(lecturerId)}/timetable${suffix}`)
 }
 
-/** body: { session_date, start_time, room_id, reason }. The end time is derived by the server. */
-export const reschedule = (lecturerId, sessionId, body) =>
-  request(`/api/lecturers/${encodeURIComponent(lecturerId)}/sessions/${encodeURIComponent(sessionId)}`, {
-    method: 'PATCH',
-    body: JSON.stringify(body),
-  })
-
 /**
- * Free time slots near what the lecturer asked for, best first (worked out by the backend from the
- * timetable: no room, lecturer or student clash; room of the right type and size).
- * Returns [{ session_date, start_time, end_time, room_id, room_name, building, capacity }].
+ * Free time slots near what the lecturer asked for, best first (the backend works them out from the
+ * timetable: no room, lecturer or student clash; room of the right type and size). Not built yet.
+ *   request:  { date: 'YYYY-MM-DD', time: 'HH:MM', flexDays: 0-7, limit }
+ *   response: [{ session_date, start_time, end_time, room_id, room_name, building, capacity }]
  */
 export function suggestSlots(lecturerId, sessionId, { date, time, flexDays = 1, limit = 6 }) {
   const query = new URLSearchParams({ date, time, flex_days: String(flexDays), limit: String(limit) })
@@ -67,3 +59,10 @@ export function suggestSlots(lecturerId, sessionId, { date, time, flexDays = 1, 
     `/api/lecturers/${encodeURIComponent(lecturerId)}/sessions/${encodeURIComponent(sessionId)}/suggestions?${query}`,
   )
 }
+
+/** body: { session_date, start_time, room_id, reason }. The end time is derived by the server. */
+export const reschedule = (lecturerId, sessionId, body) =>
+  request(`/api/lecturers/${encodeURIComponent(lecturerId)}/sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  })

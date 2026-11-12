@@ -36,6 +36,45 @@ export function endTime(startHhmm, minutes) {
   return { hhmm: `${pad(Math.floor(total / 60) % 24)}:${pad(total % 60)}`, nextDay: total >= 1440 }
 }
 
+// When classes can run (the backend enforces the same rules): Monday to Friday, 08:00 to 18:00.
+export const OPEN_TIME = '08:00'
+export const CLOSE_TIME = '18:00'
+const toMinutes = (hhmm) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5))
+const fromMinutes = (m) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`
+
+export const isWeekend = (iso) => [0, 6].includes(parseIso(iso).getUTCDay())
+
+/** The current time in Kuala Lumpur as "HH:MM". */
+export const nowTime = (now = new Date()) =>
+  new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(now)
+
+/** The latest start time that still lets a class of this length finish by 18:00, or null if it never fits. */
+export const latestStart = (minutes) => {
+  const latest = toMinutes(CLOSE_TIME) - minutes
+  return latest >= toMinutes(OPEN_TIME) ? fromMinutes(latest) : null
+}
+
+/**
+ * Why the date / start time the lecturer typed cannot be used. Returns { date, time } with a message,
+ * or an empty string when that field is fine. A field left empty has no message (the form asks for it).
+ */
+export function requestProblems(date, time, minutes, today, now = nowTime()) {
+  const out = { date: '', time: '' }
+  if (date) {
+    if (date < today) out.date = 'That date has already passed. Choose today or a later date.'
+    else if (isWeekend(date)) out.date = 'Classes run Monday to Friday only. Choose a weekday.'
+  }
+  if (/^\d{2}:\d{2}$/.test(time || '')) {
+    const latest = latestStart(minutes)
+    if (time < OPEN_TIME) out.time = `Classes start at ${formatTime(OPEN_TIME)} or later.`
+    else if (latest === null) out.time = `A ${minutes}-minute class does not fit between ${formatTime(OPEN_TIME)} and ${formatTime(CLOSE_TIME)}.`
+    else if (time > latest) {
+      out.time = `This class lasts ${minutes} minutes, so it must start by ${formatTime(latest)} to finish by ${formatTime(CLOSE_TIME)}.`
+    } else if (date === today && !out.date && time <= now) out.time = 'That time has already passed today.'
+  }
+  return out
+}
+
 /** "9 – 15 Nov 2026" or "28 Dec – 3 Jan 2027" */
 export function weekLabel(startIso) {
   const end = addDays(startIso, 6)
