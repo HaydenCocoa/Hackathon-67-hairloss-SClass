@@ -39,7 +39,9 @@ async function call(url, { method = 'GET', body } = {}) {
     const message = Array.isArray(detail) ? detail.map((item) => item.msg).join('; ')
       : typeof detail === 'string' ? detail
         : detail?.message || `The request failed (HTTP ${response.status}).`
-    throw new ScheduleApiError(message, { code: detail?.code || '', status: response.status, requestId: requestId || detail?.request_id || '' })
+    // A platform timeout (Vercel stops the function) has no JSON body and no code.
+    const code = detail?.code || (response.status === 504 ? 'SERVER_TIMEOUT' : '')
+    throw new ScheduleApiError(message, { code, status: response.status, requestId: requestId || detail?.request_id || '' })
   }
   if (data === null) throw new ScheduleApiError(`The server sent an unreadable reply (HTTP ${response.status}).`, { status: response.status, requestId })
   return { data, requestId }

@@ -18,7 +18,7 @@ Two endpoints:
 | `GET /api/admin/timetable/{session_id}/availability?date=YYYY-MM-DD[&start=HH:MM]` | Which rooms and start times are free on a day; with `start`, why each room is or is not free at that time. Read-only. |
 | `POST /api/admin/timetable/{session_id}/reschedule` | Move the class. Re-checks the move, then saves it with its change history in one database transaction. |
 
-Both need a logged-in **administrator** (login session cookie). They answer `401 AUTH_REQUIRED` without a login and `403 ADMIN_REQUIRED` for other roles. They are not restricted to the development server, so they also work on the production deployment. Responses use `Cache-Control: no-store`. Errors are `{"detail": {"code", "message", "request_id"}}`, and every request gets an `X-Request-ID` and safe traces ([scheduling logging](scheduling-logging.md)). No IDs, rosters or provider text are logged.
+Both need a logged-in **administrator** (login session cookie). They answer `401 AUTH_REQUIRED` without a login and `403 ADMIN_REQUIRED` for other roles. They are not restricted to the development server, so they also work on the production deployment. The `POST` also refuses a browser `Origin` from another site (`403 ORIGIN_NOT_ALLOWED`, see [production access](vercel-deployment.md#scheduling-on-vercel-since-12-november-2026)). Responses use `Cache-Control: no-store`. Errors are `{"detail": {"code", "message", "request_id"}}`, and every request gets an `X-Request-ID` and safe traces ([scheduling logging](scheduling-logging.md)). No IDs, rosters or provider text are logged.
 
 ## How it works (reuses the scheduling engine)
 
@@ -46,6 +46,8 @@ Response (`Availability`):
 | Field | Meaning |
 | --- | --- |
 | `session_id`, `date`, `timezone`, `duration_minutes` | The class and day |
+| `student_count` | Students in the class (its intake and group): the seats a room needs (added 12 November 2026) |
+| `status` | The class's booking status: `scheduled`, or `rescheduled` if it was moved before |
 | `step_minutes` | Spacing of the offered start times: **15** (the API itself accepts any whole minute) |
 | `rooms[]` | Every room: `id`, `name`, `building`, `room_type`, `capacity`, `is_active`, `suitable`, `issues[]`. `suitable` is false when the room can **never** take this class (`ROOM_INACTIVE`, `ROOM_TOO_SMALL`, `ROOM_TYPE_MISMATCH`, `ROOM_RESERVED_FOR_LARGE_CLASSES`, `ROOM_POLICY_UNDEFINED`) |
 | `slots[]` | Start times on `date` inside opening hours, every 15 minutes, plus the class's own current start: `start`, `end` (campus `HH:MM`), `starts_at` (UTC), `free_room_ids` (rooms where the whole class fits at that start). Past starts have no free rooms. Weekends and closed dates have no slots |
@@ -64,7 +66,8 @@ Response (`Availability`):
 Example: `GET /api/admin/timetable/<id>/availability?date=2026-11-18&start=10:00`:
 ```json
 {
-  "date": "2026-11-18", "timezone": "Asia/Kuala_Lumpur", "duration_minutes": 90, "step_minutes": 15,
+  "date": "2026-11-18", "timezone": "Asia/Kuala_Lumpur", "duration_minutes": 90, "student_count": 32,
+  "status": "scheduled", "step_minutes": 15,
   "rooms": [{"id": "…", "name": "R1", "suitable": true, "issues": []}, {"name": "LAB", "suitable": false,
              "issues": [{"code": "ROOM_TYPE_MISMATCH", "detail": "…"}]}],
   "slots": [{"start": "08:30", "end": "10:00", "starts_at": "2026-11-18T00:30:00Z", "free_room_ids": ["…"]}],
@@ -88,7 +91,7 @@ Body (extra fields rejected):
 | `expected_starts_at`, `expected_room_id` | The class's start and room as the page loaded them (aware timestamp, UUID) |
 | `starts_at` | New start, with a timezone offset, whole minutes |
 | `room_id` | New room |
-| `reason` | 1–500 characters; kept in `schedule_changes` |
+| `reason` | **Optional** (since 12 November 2026, the user's decision): up to 500 characters, kept in `schedule_changes`. Missing, `null` or blank is recorded as `"No reason given"`, because `admin_reschedule_class` requires a non-empty reason; this avoids a new migration |
 
 Steps:
 1. Validate the body.
@@ -102,6 +105,8 @@ Steps:
    - writes a `schedule_changes` `reschedule` row with the reason and the old and new values.
 
 Response `200`: `{"status": "RESCHEDULED", "session_id", "starts_at", "ends_at", "room_id"}`. The change is visible at once to the class's students, its lecturer and administrators.
+
+Other errors: `403 ORIGIN_NOT_ALLOWED` (another site's browser `Origin`), `422` for an invalid body (missing timezone, reason over 500 characters, extra fields), `422 START_NOT_WHOLE_MINUTE`.
 
 Database errors are mapped without provider text:
 

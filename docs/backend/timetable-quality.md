@@ -149,7 +149,7 @@ Local synthetic data only; the hosted Supabase project was not contacted.
 
 ## Risks and limits
 
-1. **Preview time.** With preferences on, a preview usually uses the whole time limit (now 120 s) because proving the best answer is hard even when it has been found. The admin waits that long, other previews and saves get `GENERATION_BUSY` meanwhile, and a closed browser does not stop the search. The development page is local-only, so hosted function limits do not apply to it today.
+1. **Preview time.** With preferences on, a preview usually uses the whole time limit (now 120 s) because proving the best answer is hard even when it has been found. The admin waits that long, other previews and saves get `GENERATION_BUSY` meanwhile, and a closed browser does not stop the search. Since 12 November 2026 previews also run on Vercel, where a function may run for 300 s by default (Fluid compute), which covers the 120 s limit plus loading; see [Vercel deployment](vercel-deployment.md#scheduling-on-vercel-since-12-november-2026).
 2. **Spreading across days.** Minimizing waiting time favours one class per day (see the example: student-days 80 → 200). That has no idle time but means more days on campus. A "fewer days" preference is deferred (12 November 2026, not a priority).
 3. **Repeatability.** The improvement search stops on wall-clock time, so two runs can return different (equally valid) timetables.
 4. **Capacity, not availability,** decides whether an auditorium is allowed. A large class may therefore be unschedulable if the only big-enough classroom is busy all week, even though the auditorium is free.

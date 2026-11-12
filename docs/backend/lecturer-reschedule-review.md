@@ -61,6 +61,30 @@ Findings 1–5, 8, 10 and 12 go away if the endpoint reuses the scheduling engin
 
 The admin page's reschedule (`admin_reschedule_class`) has the same gaps for opening hours and the 15-minute gap when it is called directly (the older `PUT /api/admin/timetable/{id}`). Room type, the auditorium rule and the `rescheduled` status were fixed on 12 November by [202611120003](../../supabase/migrations/202611120003_admin_reschedule_fixes.sql).
 
+## Re-check after the lecturer page update (12 November 2026)
+
+At the user's request, the lecturer code merged into `main` in PR #18 (commits `cffbd89`, `4bbc7cf` and `00e0a83`) was checked against the findings above. This was done by reading the code and running the existing tests; no lecturer code was changed.
+
+| # | Status now | Notes |
+| --- | --- | --- |
+| 1 | **Partly fixed** | Weekends and the closing time are now refused, and the suggestions use Monday–Friday only. But the opening time is hard-coded as **08:00**, while `Config/config.json` says **08:30**, so a class can be moved to start between 08:00 and 08:29. `closed_dates` and the per-day hours are not read from the config. |
+| 2 | Fixed | A 15-minute gap is checked for the room, the lecturer, the students and meetings (hard-coded `GAP`, not `min_gap_minutes`). |
+| 3 | **Partly fixed, with wrong rules** | Room type is now checked, but against a hard-coded table that differs from the accepted policy: tutorials get classrooms only (accepted: classrooms or labs), labs get labs only (accepted: classrooms or labs), and `others` gets classrooms or auditoriums (accepted: no rooms, so it is refused). The auditorium rule (only when no other room has enough seats) is not checked. |
+| 4 | **Not fixed** | An `asyncio.Lock` now serialises moves within one backend process. It does not stop another process (each Vercel instance is separate), a timetable save, or an admin move. The move and the history row are still two writes with an undo, and the update matches on `id` only. |
+| 5 | Fixed | A class that has started is refused (409), and so is a new start in the past. |
+| 6 | Fixed | The hard-coded lecturer is gone; the page uses `/api/lecturers` and the saved choice. |
+| 7 | **Not fixed** | Error replies still include exception and provider text (`str(e)`, `res.text[:300]`), and responses are printed to the console. |
+| 8 | Fixed | The validated `new_start` is written. |
+| 9 | Not fixed | IDs are still plain strings (500 instead of 422 for a malformed id). |
+| 10 | Fixed | A move to the same time and room is refused (422). |
+| 11 | Not fixed | Deferred with course end dates. |
+| 12 | Fixed | The page now shows the suggestions (every 30 minutes), using the same rules as the checks, including the gaps in 1 and 3. |
+| 13 | Fixed | The "Main menu" link and the "classroom rooms" text are gone. |
+
+**Regression:** commit `00e0a83` brought back the made-up `intake_code` (`"CS-2024"`) and `student_count` (`30`) that this review had fixed (see below), so `test_lecturer_timetable_shows_the_real_intake_code_and_group_size` fails on `main`.
+
+**Recommendation (unchanged):** switch `PATCH /api/lecturers/{id}/sessions/{id}` and the suggestions to `scheduling/reschedule.py` (engine checks with the config's hours, room policy and gap) plus a database function with an ownership check under advisory lock `7280001008`. That fixes 1, 3, 4, 7 and 9 together, and restores the real intake code and group size. Not started: the lecturer page belongs to a teammate.
+
 ## Fixed during this review
 
 - `GET /api/lecturers/{id}/timetable` returned a made-up `intake_code` (`"CS-2024"`) and `student_count` (`30`) for every class. It now reads the intake code from `intakes` and counts the students in the class's intake and group (`group_facts`). The page's room list now filters by the real group size. Test: `test_lecturer_timetable_shows_the_real_intake_code_and_group_size`.

@@ -163,6 +163,7 @@ def test_rooms_are_explained_and_the_time_grid_follows_opening_hours(supabase):
     assert response.status_code == 200, response.text
     assert response.headers["cache-control"] == "no-store"
     data = response.json()
+    assert (data["student_count"], data["status"], data["duration_minutes"]) == (3, "scheduled", 90)
     rooms = {room["name"]: room for room in data["rooms"]}
     assert [name for name, room in rooms.items() if room["suitable"]] == ["R1", "R2"]
     assert {name: [i["code"] for i in rooms[name]["issues"]] for name in ("AUD", "LAB", "OFF", "SMALL")} == {
@@ -259,13 +260,39 @@ def test_a_valid_move_is_checked_then_saved_by_the_database_function(supabase):
     assert _time(call["body"]["new_start"]) == at(2, "13:00") and call["body"]["change_reason"] == "Lecturer request"
 
 
+@pytest.mark.parametrize("reason", [None, "", "   ", "omit"])
+def test_the_reason_is_optional_and_recorded_as_no_reason_given(supabase, reason):
+    settings, state = supabase
+    body = move(reason=reason)
+    if reason == "omit":
+        del body["reason"]
+    with client(settings) as c:
+        response = c.post(f"/api/admin/timetable/{MOVING}/reschedule", json=body)
+    assert response.status_code == 200, response.text
+    [call] = state["rpc"]
+    assert call["body"]["change_reason"] == "No reason given"
+
+
+def test_a_cross_site_origin_cannot_reschedule_but_this_site_can(supabase):
+    settings, state = supabase
+    with client(settings) as c:
+        rejected = c.post(f"/api/admin/timetable/{MOVING}/reschedule", json=move(),
+                          headers={"Origin": "https://attacker.example"})
+        assert rejected.status_code == 403 and rejected.json()["detail"]["code"] == "ORIGIN_NOT_ALLOWED"
+        assert state["rpc"] == []
+        # Behind Vercel's proxy the browser's host arrives as X-Forwarded-Host.
+        allowed = c.post(f"/api/admin/timetable/{MOVING}/reschedule", json=move(),
+                         headers={"Origin": "https://sclass.example", "X-Forwarded-Host": "sclass.example"})
+        assert allowed.status_code == 200, allowed.text
+
+
 @pytest.mark.parametrize("body,status,code", [
     (move(2, "10:00", R1), 409, "SLOT_UNAVAILABLE"),                 # R1 is busy
     (move(3, "14:00", R2), 409, "SLOT_UNAVAILABLE"),                 # lecturer busy
     (move(2, "13:00", LAB), 409, "SLOT_UNAVAILABLE"),                # wrong room type
     (move(2, "13:00", R2, expected_room_id=R2), 409, "CLASS_CHANGED"),
     (move(0, "09:00", R1), 422, "NO_CHANGE"),
-    (move(2, "13:00", R2, reason=" "), 422, None),
+    ({**move(), "reason": "x" * 501}, 422, None),                   # reason too long
     ({**move(), "starts_at": "2030-01-07T09:00:00"}, 422, None),    # no timezone
     ({**move(), "starts_at": at(2, "13:00").replace(second=30).isoformat()}, 422, "START_NOT_WHOLE_MINUTE"),
     ({**move(), "extra": 1}, 422, None),

@@ -6,7 +6,7 @@
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { addDays, formatMinutes, todayIso } from './roomCalendar'
 import {
-  classLabel, classTime, isDirty, isMoved, longDay, moveBody, reschedulable, roomChoice, slotBlock, teachingDays, toMinutes,
+  classLabel, classTime, isDirty, isMoved, longDay, moveBody, reschedulable, roomChoice, slotBlock, teachingDays, toMinutes, durationText,
 } from './reschedule'
 import { getAvailability, rescheduleClass } from './scheduleApi'
 
@@ -51,9 +51,12 @@ const saveHint = computed(() => {
   if (!moved.value) return form.start ? 'Change the time or the room to save.' : 'Choose a start time.'
   if (loading.value) return 'Checking availability…'
   if (!roomFree.value) return 'The chosen room is not free at this time.'
-  if (!form.reason.trim()) return 'Enter a reason for the change.'
   return ''
 })
+// Facts about the class itself (same for every date), from the latest availability answer.
+const facts = computed(() => (availability.value?.session_id === classId.value ? availability.value : null))
+const currentRoom = computed(() => (facts.value?.rooms || []).find((room) => room.id === session.value?.room_id) || null)
+const duration = computed(() => (session.value ? durationText(session.value) : ''))
 const canSave = computed(() => !saveHint.value && !saving.value)
 const prevWeekDisabled = computed(() => addDays(days.value[4]?.iso || form.date, -7) < today.value)
 
@@ -202,8 +205,10 @@ async function publish() {
           <div><dt>Class type</dt><dd class="rd-cap">{{ session.course_type }}</dd></div>
           <div><dt>Intake &amp; group</dt><dd>{{ session.intake?.intake_code || 'Unknown intake' }} · Group {{ session.group_number }}</dd></div>
           <div><dt>Lecturer</dt><dd>{{ session.lecturer?.full_name || 'Unknown lecturer' }}</dd></div>
-          <div><dt>Venue now</dt><dd>{{ session.room?.name || 'No room' }}<small v-if="session.room?.building"> · {{ session.room.building }}</small></dd></div>
-          <div><dt>Time now</dt><dd>{{ longDay(current.date) }}, {{ current.range }}</dd></div>
+          <div><dt>Students</dt><dd>{{ facts ? `${facts.student_count} in this group` : '…' }}</dd></div>
+          <div><dt>Venue now</dt><dd>{{ session.room?.name || 'No room' }}<small v-if="session.room?.building"> · {{ session.room.building }}</small><small v-if="currentRoom"> · {{ currentRoom.capacity }} seats</small></dd></div>
+          <div><dt>Time now</dt><dd>{{ longDay(current.date) }}, {{ current.range }} <small>({{ duration }})</small></dd></div>
+          <div><dt>Status</dt><dd><span :class="['rd-status', session.status === 'rescheduled' && 'is-moved']">{{ session.status === 'rescheduled' ? 'Rescheduled before' : 'As scheduled' }}</span></dd></div>
         </dl>
 
         <section class="rd-section" aria-labelledby="rd-time">
@@ -259,7 +264,7 @@ async function publish() {
         </section>
 
         <section class="rd-section">
-          <label class="rd-label" for="rd-reason">Reason for the change <span class="rd-hint">(kept in the change history)</span></label>
+          <label class="rd-label" for="rd-reason">Reason for the change <span class="rd-hint">(optional, kept in the change history)</span></label>
           <textarea id="rd-reason" v-model="form.reason" rows="2" maxlength="500" :disabled="saving" placeholder="For example: lecturer attending a conference"></textarea>
         </section>
 
@@ -327,6 +332,8 @@ async function publish() {
 .rd-details dt { color: #5f6368; font-size: 12px; font-weight: 600; }
 .rd-details dd { margin: 2px 0 0; overflow-wrap: anywhere; }
 .rd-details small { color: #5f6368; }
+.rd-status { display: inline-block; padding: 1px 8px; border-radius: 10px; background: #e6f4ea; color: #137333; font-size: 12px; font-weight: 600; }
+.rd-status.is-moved { background: #fef7e0; color: #b06000; }
 .rd-cap { text-transform: capitalize; }
 .rd-section { display: flex; flex-direction: column; gap: 10px; }
 .rd-row { display: flex; align-items: center; justify-content: space-between; }

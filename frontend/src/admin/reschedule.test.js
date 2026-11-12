@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
-  classLabel, classTime, hhmm, isDirty, isMoved, issueShort, moveBody, reschedulable, roomChoice, slotBlock, teachingDays,
+  classLabel, classTime, durationText, hhmm, isDirty, isMoved, issueShort, moveBody, reschedulable, roomChoice, slotBlock, teachingDays,
   toMinutes,
 } from './reschedule.js'
 
@@ -71,5 +71,12 @@ test('changes, saving and the request body', () => {
   const c = cls('a', '2026-11-17', '08:30', '10:00')
   assert.deepEqual(moveBody(c, { date: '2026-11-18', start: '13:15', roomId: 'R2', reason: '  Clash  ' }), {
     expected_starts_at: c.starts_at, expected_room_id: 'R1', starts_at: '2026-11-18T13:15:00+08:00', room_id: 'R2', reason: 'Clash',
-  })
+  })  // The reason is optional: blank becomes null (the API records "No reason given").
+  assert.equal(moveBody(c, { date: '2026-11-18', start: '13:15', roomId: 'R2', reason: '   ' }).reason, null)
+})
+
+test('durationText reads the class length', () => {
+  assert.equal(durationText(cls('a', '2026-11-17', '08:30', '10:00')), '1h 30m')
+  assert.equal(durationText(cls('a', '2026-11-17', '08:30', '10:30')), '2h')
+  assert.equal(durationText(cls('a', '2026-11-17', '08:30', '09:15')), '45 min')
 })

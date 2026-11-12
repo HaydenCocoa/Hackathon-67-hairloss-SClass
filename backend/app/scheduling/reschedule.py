@@ -33,12 +33,14 @@ from ..observability import REQUEST_ID, event, safe_frames
 from ..student import Supabase
 from .candidates import CandidateGenerator
 from .loader import ClassRequirement, SchedulingDataError, SchedulingSnapshot, load_scheduling_snapshot
-from .preview import failure
+from .preview import failure, origin_allowed
 from .requirements import ACTIVE_BOOKING_STATUSES
 from .validator import BookingProposal, BookingValidator
 
 # Start times offered in the dialog's time grid (any whole minute is still accepted by the API).
 SLOT_MINUTES = 15
+# The database function needs a non-empty reason; an optional one left blank is recorded as this text.
+NO_REASON_TEXT = "No reason given"
 # Issues about one room; every other issue makes the time itself unavailable, whatever the room.
 ROOM_CODES = {"ROOM_NOT_FOUND", "ROOM_INACTIVE", "ROOM_TOO_SMALL", "ROOM_POLICY_UNDEFINED", "ROOM_TYPE_MISMATCH",
               "ROOM_RESERVED_FOR_LARGE_CLASSES", "ROOM_CONFLICT"}
@@ -85,6 +87,8 @@ class Availability(BaseModel):
     date: date
     timezone: str
     duration_minutes: int
+    student_count: int = Field(description="Students in the class (its intake and group), the seats a room needs")
+    status: str = Field(description="The class's booking status: scheduled or rescheduled (moved before)")
     step_minutes: int
     rooms: list[RoomOption]
     slots: list[Slot] = Field(description="Start times on `date` within opening hours, every step_minutes, plus the class's current start")
@@ -97,7 +101,14 @@ class RescheduleRequest(BaseModel):
     expected_room_id: UUID = Field(description="The class's room as the page loaded it")
     starts_at: datetime = Field(description="New start, with a timezone offset; whole minutes")
     room_id: UUID = Field(description="New room")
-    reason: str = Field(min_length=1, max_length=500, description="Why the class moves (kept in the change history)")
+    reason: str | None = Field(default=None, max_length=500,
+                               description="Optional: why the class moves (kept in the change history). When it is "
+                                           "missing or blank, the history records NO_REASON_TEXT instead.")
+
+    @field_validator("reason")
+    @classmethod
+    def blank_is_none(cls, value: str | None) -> str | None:
+        return value or None
 
     @field_validator("expected_starts_at", "starts_at")
     @classmethod
@@ -151,6 +162,10 @@ def create_reschedule_router(settings: Settings) -> APIRouter:
         if session.role != "admin":
             raise failure(403, "ADMIN_REQUIRED", "Only administrators can reschedule classes here.", "reschedule_rejected")
         return session
+
+    async def same_site(request: Request):
+        if not origin_allowed(request, settings.server.cors_origins):
+            raise failure(403, "ORIGIN_NOT_ALLOWED", "This browser origin cannot reschedule classes.", "reschedule_rejected")
 
     async def load_class(db: Supabase, session_id: UUID) -> tuple[dict, frozenset[UUID]]:
         rows = await db.get("class_session_details", [("select", CLASS_SELECT), ("id", f"eq.{session_id}")])
@@ -270,7 +285,8 @@ def create_reschedule_router(settings: Settings) -> APIRouter:
                                     available_room_ids=free, room_issues=room_issues)
         event("availability_checked", row_count=len(slots))
         return Availability(session_id=session_id, date=day, timezone=settings.scheduling.timezone,
-                            duration_minutes=row["duration_minutes"], step_minutes=SLOT_MINUTES, rooms=options,
+                            duration_minutes=row["duration_minutes"], student_count=len(students),
+                            status=row["status"], step_minutes=SLOT_MINUTES, rooms=options,
                             slots=slots, selected=selected)
 
     @router.post(
@@ -281,7 +297,7 @@ def create_reschedule_router(settings: Settings) -> APIRouter:
                     "class rescheduled and records the change, all in one transaction. Visible to everyone at once.",
     )
     async def reschedule(session_id: UUID, body: RescheduleRequest, request: Request, response: Response,
-                         _admin: SessionUser = Depends(admin)):
+                         _origin: None = Depends(same_site), _admin: SessionUser = Depends(admin)):
         response.headers["Cache-Control"] = "no-store"
         if body.starts_at.second or body.starts_at.microsecond:
             raise failure(422, "START_NOT_WHOLE_MINUTE", "Classes start on a whole minute.", "reschedule_rejected")
@@ -316,7 +332,7 @@ def create_reschedule_router(settings: Settings) -> APIRouter:
                 f"{db.url}/rest/v1/rpc/admin_reschedule_class", headers={**db.headers, "Authorization": f"Bearer {token}"},
                 json={"session_id": str(session_id), "expected_start": body.expected_starts_at.isoformat(),
                       "expected_room": str(body.expected_room_id), "new_start": body.starts_at.isoformat(),
-                      "new_room": str(body.room_id), "change_reason": body.reason},
+                      "new_room": str(body.room_id), "change_reason": body.reason or NO_REASON_TEXT},
                 timeout=db.timeout,
             )
         except httpx.TimeoutException as exc:

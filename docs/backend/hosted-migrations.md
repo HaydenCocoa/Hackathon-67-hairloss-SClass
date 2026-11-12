@@ -64,4 +64,4 @@ Run 2 and 5 in the same session. Between them, the admin page's **Reschedule** f
 
 - Run the status query again: every column should be `true`.
 - Try one admin reschedule and one lecturer reschedule on a sample class.
-- Saving a generated timetable needs the local backend (see [Vercel deployment](vercel-deployment.md): previews and saves are local-development only).
+- Saving a generated timetable works on the local backend and, since 12 November 2026, on Vercel (see [Vercel deployment](vercel-deployment.md#scheduling-on-vercel-since-12-november-2026)). It needs `202611120002_save_audit`.

@@ -331,7 +331,7 @@ def test_one_generation_at_a_time_and_health_responds_during_solve(provider, mon
 
 
 @pytest.mark.parametrize("case", ["production", "remote", "host", "origin", "forwarded"])
-def test_access_rejected_before_database_for_page_assets_and_api(provider, case):
+def test_development_page_and_assets_stay_local_only(provider, case):
     settings, state = provider
     peer, headers = ("127.0.0.1", 51000), {}
     if case == "production":
@@ -346,9 +346,40 @@ def test_access_rejected_before_database_for_page_assets_and_api(provider, case)
         headers = {"X-Forwarded-For": "127.0.0.1"}
     with TestClient(as_admin(create_app(settings)), base_url=BASE, client=peer, headers=headers) as client:
         expected = 404 if case == "production" else 403
-        assert client.post("/api/schedules/generate", json=WEEK).status_code == expected
         for path in (preview.PAGE_PATH, preview.PAGE_PATH + "/app.js", preview.PAGE_PATH + "/style.css"):
             assert client.get(path).status_code == expected
+    assert not state["calls"]
+
+
+@pytest.mark.parametrize("case", ["production", "remote", "vercel"])
+def test_generate_works_in_production_behind_a_proxy(provider, case):
+    """Since 12 November 2026 the API is a production endpoint (Vercel): admin login only."""
+    settings, state = provider
+    peer, headers = ("127.0.0.1", 51000), {}
+    if case == "production":
+        settings.app.environment = "production"
+    elif case == "remote":
+        peer = ("192.0.2.10", 51000)
+    else:
+        settings.app.environment = "production"
+        peer = ("192.0.2.10", 51000)
+        headers = {"X-Forwarded-For": "198.51.100.7", "X-Forwarded-Proto": "https",
+                   "X-Forwarded-Host": "sclass.example", "Origin": "https://sclass.example"}
+    with TestClient(as_admin(create_app(settings)), base_url=BASE, client=peer, headers=headers) as client:
+        response = client.post("/api/schedules/generate", json=WEEK)
+        assert response.status_code == 200, response.text
+    assert state["calls"]
+
+
+def test_generate_refuses_another_site_and_non_admins_before_the_database(provider):
+    settings, state = provider
+    settings.app.environment = "production"
+    with TestClient(as_admin(create_app(settings)), base_url=BASE, client=("192.0.2.10", 51000)) as client:
+        response = client.post("/api/schedules/generate", json=WEEK, headers={"Origin": "https://attacker.example"})
+        assert response.status_code == 403 and response.json()["detail"]["code"] == "ORIGIN_NOT_ALLOWED"
+    with TestClient(create_app(settings), base_url=BASE, client=("192.0.2.10", 51000)) as client:
+        response = client.post("/api/schedules/generate", json=WEEK)
+        assert response.status_code == 401 and response.json()["detail"]["code"] == "AUTH_REQUIRED"
     assert not state["calls"]
 
 

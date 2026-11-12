@@ -66,9 +66,8 @@ export function errorAdvice(code) {
     PLACEMENT_CONFLICT: 'A class no longer fits. Regenerate the preview.',
     SAVE_OUTCOME_UNKNOWN: 'Regenerate the preview to see whether the classes were saved before trying again.',
     AUDIT_NOT_INSTALLED: 'Ask the project owner to apply the save-audit database migration.',
-    DEVELOPMENT_DISABLED: 'Scheduling runs only on the local development server; it is not available on this deployment.',
-    LOCAL_ACCESS_ONLY: 'Scheduling runs only on the local development server; open this page there.',
-    ORIGIN_NOT_ALLOWED: 'Open this page from the same server that runs the backend.',
+    ORIGIN_NOT_ALLOWED: 'Open SClass from its own address (not through another site) and try again.',
+    SERVER_TIMEOUT: 'The server stopped before it finished. If you were saving, regenerate the preview to check what was saved; otherwise try fewer intakes at once.',
   })[code] || ''
 }
 

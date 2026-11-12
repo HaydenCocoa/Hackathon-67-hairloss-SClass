@@ -2,7 +2,7 @@
 
 Prepared: 12 November 2026, branch `feature-vercel-services`.
 
-**Update, 12 November 2026:** the user reports that the Vercel setup is complete. Vercel is used **for production only**; development and testing stay on the local machine, so `vercel dev` and preview deployments are not part of the workflow. This record has not independently checked the live deployment. Because the scheduling preview and save are local-development tools, timetable generation and saving are **not available on Vercel** (see "Behaviour differences" below). Generate and save timetables from a local backend connected to the same Supabase project.
+**Update, 12 November 2026:** the user reports that the Vercel setup is complete. Vercel is used **for production only**; development and testing stay on the local machine, so `vercel dev` and preview deployments are not part of the workflow. This record has not independently checked the live deployment. **Superseded later the same day:** timetable generation and saving now work on Vercel; see "Scheduling on Vercel" below.
 
 Related: [backend record](agents.md), [login](login.md), [scheduling preview](schedule-preview-api.md).
 
@@ -51,7 +51,29 @@ The `127.0.0.1:8000` proxy in `frontend/vite.config.js` is only for the existing
 - **Session cache.** The 60-second token cache is per function instance, so instances may verify the same token separately. No correctness change.
 - **File logging.** `logs/scheduling.log` cannot be written (read-only filesystem); the existing fallback logs a `file_logging_unavailable` event and keeps console logs, which appear in Vercel Runtime Logs.
 - **`Secure` cookies** are set when the backend sees an `https` request scheme. Whether Vercel's Python runtime reports `https` has not been checked; if not, cookies are still httpOnly and `SameSite=Lax`, but without `Secure`.
-- **`app.environment`** is `development` in the tracked config. The scheduling development tools remain blocked on Vercel by the localhost/forwarded-header check.
+- **`app.environment`** is `development` in the tracked config. The scheduling **test page** under `/admin/development/` remains blocked on Vercel by the localhost/forwarded-header check (and is not routed there). The scheduling API is no longer affected (below).
+
+## Scheduling on Vercel (since 12 November 2026)
+
+**Requirement (user, 12 November 2026):** "the generate preview and saving feature seems keep relying on the local environment… The feature now should be migrated to be usable on production environment."
+
+**Cause:** `POST /api/schedules/generate` and `POST /api/schedules/save` shared the test page's guard, which needs `app.environment=development`, a loopback client and Host, and **no** `Forwarded`/`X-Forwarded-*` headers. Vercel adds forwarded headers to every request, so both calls always returned `403 LOCAL_ACCESS_ONLY` there. Nothing else tied them to the local machine: the preview is not stored on the server (the page sends it back to save), and the solver, loader and save use only Supabase.
+
+**Change (`backend/app/scheduling/preview.py`):**
+- The two API routes now need an **admin login** and a same-site browser `Origin`. `origin_allowed()` accepts a request with no `Origin`, one listed in `server.cors_origins`, or one whose host equals the request's `Host` or `X-Forwarded-Host` (Vercel passes the browser's host there). Otherwise the answer is `403 ORIGIN_NOT_ALLOWED`, before the session or database is used. Together with the `SameSite=Lax` session cookie and the JSON body (which forces a CORS preflight), this stops other sites from using an admin's session.
+- The same Origin check now guards `POST /api/admin/timetable/{id}/reschedule`.
+- The test page `/admin/development/scheduling-test-hayden` and its JS/CSS keep every local-only check, as the accepted rules require.
+- Frontend: the local-only messages were removed from `schedulePreview.js`. A platform `504` without a JSON body (Vercel stopping the function) now shows a `SERVER_TIMEOUT` message, which also says to regenerate before saving again.
+
+**Vercel limits checked:**
+
+| Limit | Value | Fits? |
+| --- | --- | --- |
+| Function duration | 300 s by default on every plan with Fluid compute ([Vercel docs](https://vercel.com/docs/functions/configuring-functions/duration)) | Yes: the solver stops at `scheduling.solver.max_time_seconds` = 120 s, plus loading. Without Fluid compute (older projects) the default can be much shorter; then set `maxDuration` or lower the solver limit. |
+| Bundle size | 250 MB uncompressed for a function | Probably: the backend's packages take about 180 MB installed locally (OR-Tools 84 MB, NumPy 42 MB, pandas 39 MB). Not measured on a Linux build. |
+| Concurrent runs | Each function instance has its own one-at-a-time slot (`GENERATION_BUSY`) | Previews in different instances can run together; that is safe because they write nothing. Two saves in different instances are no longer kept apart by that slot. Each save's insert still takes advisory lock `7280001008` and the database constraints, and the revision check rejects a stale preview, but the short race between the re-check and the insert (saving decision D3) now also applies between instances. Admin moves run fully inside the database function's lock. |
+
+**Not verified:** a real Vercel deployment. Check one preview and one save on the live site, the function's run time in Vercel's logs, and that the project uses Fluid compute.
 
 ## Verification
 

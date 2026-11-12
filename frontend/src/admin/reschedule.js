@@ -90,6 +90,16 @@ export function moveBody(session, form) {
     expected_room_id: session.room_id,
     starts_at: `${form.date}T${form.start}:00+08:00`,
     room_id: form.roomId,
-    reason: form.reason.trim(),
+    // Optional: an empty reason is sent as null and recorded as "No reason given".
+    reason: form.reason.trim() || null,
   }
+}
+
+/** Length of a class, such as "1h 30m" or "45 min". */
+export function durationText(session) {
+  const minutes = Math.round((new Date(session.ends_at) - new Date(session.starts_at)) / 60000)
+  if (!(minutes > 0)) return ''
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  return h ? `${h}h${m ? ` ${String(m).padStart(2, '0')}m` : ''}` : `${m} min`
 }
