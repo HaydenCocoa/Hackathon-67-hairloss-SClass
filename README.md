@@ -52,6 +52,16 @@ npm run dev
 
 Open **http://127.0.0.1:5173**. The main menu loads its display settings from FastAPI and shows backend/configuration status. Click **Test connection** to check Supabase. **Open API reference** opens FastAPI's interactive documentation.
 
+## Admin workspace
+
+Open **http://127.0.0.1:5173/#/admin**. Choose **Try local demo** to try courses, students, lecturers, intakes and timetable actions in memory. Demo data is discarded when the page reloads, and the demo does not check scheduling conflicts.
+
+For a database-backed workspace, use an isolated development Supabase project and enter the access token of a signed-in account linked to `admins.auth_user_id`. Configure its URL and server-only key in `.env`. The admin API verifies the token and admin membership on each request. Student and lecturer CRUD changes profiles only; it does not create or delete Supabase Auth accounts.
+
+To enable timetable editing and removal of cancelled classes, apply [the admin timetable migration](supabase/migrations/202611110001_admin_timetable.sql) once to the development database after the existing schema and migrations. It is not applied automatically. Rescheduling checks room suitability and overlapping classes and meetings, then records the change in the same transaction. Removing a cancelled class hides it from the timetable while retaining the class and its history. The scheduling algorithm is not included.
+
+The migration uses the existing configuration advisory lock for timetable and meeting writes. Scheduling operations introduced later should use the same lock and conflict rules. A deployed database also needs the migration before these timetable actions can work.
+
 ## Serve the built app through FastAPI
 
 ```powershell
@@ -80,7 +90,7 @@ Open **http://127.0.0.1:8000**. FastAPI serves the compiled Vue app and API from
 | `GET /docs` | Interactive OpenAPI reference |
 | `GET /openapi.json` | Generated, reusable API contract |
 
-Database results include `status`, a safe `message`, UTC `checked_at`, and `latency_ms` (populated on success). Missing credentials, rejected access, missing table, upstream failure, timeout and invalid responses have distinct safe messages. A successful check verifies a read via the Supabase Data API, rather than just reaching its HTTP server. This is an MVP with no authentication, scheduling operations or preference persistence.
+Database results include `status`, a safe `message`, UTC `checked_at`, and `latency_ms` (populated on success). Missing credentials, rejected access, missing table, upstream failure, timeout and invalid responses have distinct safe messages. A successful check verifies a read via the Supabase Data API, rather than just reaching its HTTP server. The admin workspace accepts an existing Supabase access token. Automatic scheduling and preference persistence are not implemented.
 
 ## Verify
 

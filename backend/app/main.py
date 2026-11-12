@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import AppSettings, PROJECT_ROOT, Settings, load_settings
 from .database import DatabaseHealth, check_database
 from .student import create_student_router
+from .admin import create_admin_router
 
 
 def create_app(settings: Settings | None = None, frontend_dist: Path | None = None) -> FastAPI:
@@ -30,8 +31,8 @@ def create_app(settings: Settings | None = None, frontend_dist: Path | None = No
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.server.cors_origins,
-        allow_methods=["GET"],
-        allow_headers=["Accept", "Content-Type"],
+        allow_methods=["GET", "POST", "PUT", "DELETE"],
+        allow_headers=["Accept", "Content-Type", "Authorization"],
     )
 
     @app.get("/api/health")
@@ -50,6 +51,7 @@ def create_app(settings: Settings | None = None, frontend_dist: Path | None = No
 
     # Student Page (Bi Jin): profile + weekly timetable
     app.include_router(create_student_router(settings.supabase))
+    app.include_router(create_admin_router(settings.supabase))
 
     @app.get("/", include_in_schema=False)
     async def index():

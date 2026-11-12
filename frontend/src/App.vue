@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { getJson } from './api'
 import StudentPage from './student/StudentPage.vue'
+import AdminPage from './admin/AdminPage.vue'
 
 // Simple hash routes: #/student opens the Student Page.
 const route = ref(window.location.hash)
@@ -53,12 +54,14 @@ onMounted(loadApp)
 </script>
 
 <template>
-  <StudentPage v-if="isStudentPage" />
+  <AdminPage v-if="route.startsWith('#/admin')" />
+  <StudentPage v-else-if="isStudentPage" />
   <div v-else class="app-shell">
     <aside class="sidebar">
       <a class="brand" href="/" aria-label="SClass home"><span class="brand-icon">S<span>•</span></span>{{ config?.name || 'SClass' }}</a>
       <p class="nav-label">WORKSPACE</p>
       <a class="nav-item active" href="#main" aria-current="page"><span aria-hidden="true">▦</span> Main menu</a>
+      <a class="nav-item" href="#/admin">▦ Admin workspace</a>
       <a class="nav-item" href="#/student"><span aria-hidden="true">▤</span> Student timetable</a>
       <div class="sidebar-note"><span class="small-dot"></span> A little structure.<br />More room to learn.</div>
       <div class="sidebar-footer">SCLASS <span> / </span> MVP 0.1</div>
