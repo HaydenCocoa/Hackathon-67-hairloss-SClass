@@ -4,7 +4,8 @@
 import { computed, ref, watch } from 'vue'
 import { eventLines, layoutEvents, todayIso, weekDays } from './roomCalendar'
 import {
-  FILTER_KINDS, filterChoices, matchesFilter, outcome, placementRows, rowsByDay, summaryCards, weekTitle,
+  FILTER_KINDS, filterChoices, groupChoices, matchesFilter, matchesGroup, outcome, placementRows, rowsByDay, summaryCards,
+  weekTitle,
 } from './schedulePreview'
 import WeekGrid from './WeekGrid.vue'
 
@@ -21,6 +22,7 @@ const props = defineProps({
 const view = ref('calendar')
 const kind = ref('intake')
 const value = ref('all')
+const group = ref('all') // only used when showing one intake
 
 const rows = computed(() => (props.preview ? placementRows(props.preview, props.names) : []))
 const result = computed(() => {
@@ -35,7 +37,10 @@ const result = computed(() => {
 })
 const cards = computed(() => (props.preview ? summaryCards(props.preview) : []))
 const choices = computed(() => filterChoices(rows.value, kind.value))
-const shownRows = computed(() => rows.value.filter((row) => matchesFilter(row, kind.value, value.value)))
+const groups = computed(() => (kind.value === 'intake' ? groupChoices(rows.value, value.value) : []))
+const intakeCount = computed(() => groups.value.reduce((sum, item) => sum + item.count, 0))
+const shownRows = computed(() => rows.value.filter((row) => matchesFilter(row, kind.value, value.value)
+  && (kind.value !== 'intake' || matchesGroup(row, group.value))))
 const days = computed(() => (props.preview ? weekDays(props.preview.week_start, todayIso()) : []))
 const layout = computed(() => layoutEvents(shownRows.value, props.preview?.week_start || '2000-01-03'))
 const byDay = computed(() => (props.preview ? rowsByDay(shownRows.value, props.preview.week_start) : []))
@@ -49,10 +54,19 @@ watch(() => props.preview, (preview) => {
   if (!preview) return
   kind.value = 'intake'
   value.value = choices.value.length > 1 ? choices.value[0].value : 'all'
+  group.value = 'all'
 })
 
+// Picking another intake (or another kind of filter) shows all its groups again.
+watch([kind, value], () => { group.value = 'all' })
+
 const lines = (event) => eventLines(event.endMinutes - event.startMinutes)
-const third = (event) => (kind.value === 'room' ? `${event.intake_code} · G${event.group_number}` : event.room_name)
+const third = (event) => {
+  if (kind.value === 'room') return `${event.intake_code} · G${event.group_number}`
+  // One intake with all its groups: say which group each class is for.
+  if (kind.value === 'intake' && value.value !== 'all' && group.value === 'all') return `G${event.group_number} · ${event.room_name}`
+  return event.room_name
+}
 const describe = (event) => [
   `${event.course_code} ${event.course_type}`, event.course_name, event.time, `${event.intake_code} · Group ${event.group_number}`,
   `${event.room_name} (${event.room_building})`, event.lecturer_name, `${event.student_count} students`,
@@ -125,6 +139,13 @@ const dayTitle = (iso) => days.value.find((day) => day.iso === iso)?.label || is
               <option value="all">All ({{ rows.length }})</option>
               <option v-for="choice in choices" :key="choice.value" :value="choice.value">{{ choice.label }} ({{ choice.count }})</option>
             </select>
+            <label v-if="kind === 'intake'">Group
+              <select v-model="group" aria-label="Which group of the intake" :disabled="value === 'all'"
+                      :title="value === 'all' ? 'Choose an intake first' : ''">
+                <option value="all">All groups{{ value === 'all' ? '' : ` (${intakeCount})` }}</option>
+                <option v-for="item in groups" :key="item.value" :value="item.value">{{ item.label }} ({{ item.count }})</option>
+              </select>
+            </label>
             <div class="pp-toggle" role="group" aria-label="View">
               <button type="button" :aria-pressed="view === 'calendar'" @click="view = 'calendar'">Calendar</button>
               <button type="button" :aria-pressed="view === 'list'" @click="view = 'list'">List</button>
@@ -214,6 +235,7 @@ const dayTitle = (iso) => days.value.find((day) => day.iso === iso)?.label || is
 .pp-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .pp-controls label { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: #3c4043; }
 .pp-controls select { max-width: 260px; padding: 7px 10px; border: 1px solid #cdd5e0; border-radius: 8px; background: #fff; color: #202124; }
+.pp-controls select:disabled { background: #f1f3f4; color: #80868b; cursor: not-allowed; }
 .pp-toggle { display: inline-flex; border: 1px solid #dadce0; border-radius: 8px; overflow: hidden; }
 .pp-toggle button { padding: 7px 14px; border: 0; background: #fff; color: #3c4043; cursor: pointer; }
 .pp-toggle button + button { border-left: 1px solid #dadce0; }
