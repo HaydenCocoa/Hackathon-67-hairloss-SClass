@@ -7,9 +7,9 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import IntakePanel from './IntakePanel.vue'
 import PreviewPanel from './PreviewPanel.vue'
 import ScheduleConfirmDialog from './ScheduleConfirmDialog.vue'
-import { generatePreview, listIntakes, listLecturers, savePreview } from './scheduleApi'
+import { PAUSED, generatePreview, listIntakes, listLecturers, savePreview, stopPreview } from './scheduleApi'
 import { mondayOf, todayIso } from './roomCalendar'
-import { errorAdvice, keepsPreview, selectionKey, weekTitle } from './schedulePreview'
+import { errorAdvice, keepsPreview, newRunId, selectionKey, weekTitle } from './schedulePreview'
 
 // ---------- data ----------
 const week = ref(mondayOf(todayIso()))
@@ -29,6 +29,12 @@ const error = ref(null)
 const elapsed = ref(0)
 const confirmOpen = ref(false)
 const saving = ref(false)
+const pausing = ref(false)
+const notice = ref('') // a status line, e.g. after Pause
+// The running Generate press: { id, controller, giveUp }. Pause stops this one only.
+let run = null
+// After the server agrees to stop, how long to wait for its answer before giving up on it.
+const PAUSE_WAIT_MS = 15000
 let timer = null
 
 const names = computed(() => ({
@@ -84,29 +90,66 @@ async function generate() {
   const key = selectionKey(week.value, selected.value)
   const chosenWeek = week.value
   const chosenIntakes = [...selected.value]
+  const mine = { id: newRunId(), controller: new AbortController(), giveUp: null }
+  run = mine
   phase.value = 'generating'
   error.value = null
+  notice.value = ''
   saved.value = null
   elapsed.value = 0
   timer = setInterval(() => { elapsed.value += 1 }, 1000)
   try {
-    const { data } = await generatePreview(chosenWeek, chosenIntakes)
-    preview.value = data
-    previewKey.value = key
-    usable.value = true
+    const { data } = await generatePreview(chosenWeek, chosenIntakes, { runId: mine.id, signal: mine.controller.signal })
+    if (data.stopped && !data.has_solution && preview.value) {
+      // Paused before a new timetable was found: keep showing the previous one.
+      notice.value = 'Scheduling paused before a new timetable was found. Nothing was saved; the previous preview is still shown.'
+    } else {
+      preview.value = data
+      previewKey.value = key
+      usable.value = true
+    }
   } catch (e) {
-    error.value = problem(e, 'The preview could not be generated.')
+    if (e.code === PAUSED) {
+      notice.value = preview.value
+        ? 'Scheduling paused. Nothing was saved; the previous preview is still shown.'
+        : 'Scheduling paused. Nothing was saved. Generate the preview again to start over.'
+    } else {
+      error.value = problem(e, 'The preview could not be generated.')
+    }
   } finally {
+    clearTimeout(mine.giveUp)
+    if (run === mine) run = null
+    pausing.value = false
     clearInterval(timer)
     timer = null
     phase.value = preview.value ? 'result' : 'idle'
   }
 }
 
+// Pause: the server stops the search and answers the Generate request with the best timetable
+// found so far (or none). If this server is not running it (another instance, or the request
+// failed), the page simply stops waiting; nothing is ever saved by generating.
+async function pause() {
+  const mine = run
+  if (!mine || pausing.value) return
+  pausing.value = true
+  let accepted = false
+  try {
+    accepted = (await stopPreview(mine.id)).data?.stopped === true
+  } catch { /* stop waiting below */ }
+  if (run !== mine) return // it finished meanwhile
+  if (!accepted) {
+    mine.controller.abort()
+    return
+  }
+  mine.giveUp = setTimeout(() => mine.controller.abort(), PAUSE_WAIT_MS)
+}
+
 async function confirmSchedule() {
   if (!canSchedule.value) return
   saving.value = true
   error.value = null
+  notice.value = ''
   try {
     const { data } = await savePreview(preview.value)
     saved.value = { count: data.saved_count, by: data.saved_by, week: weekTitle(preview.value.week_start) }
@@ -209,6 +252,12 @@ onBeforeUnmount(() => {
         >
           {{ phase === 'generating' ? 'Generating…' : reviewing ? 'Regenerate Preview' : 'Generate Preview' }}
         </button>
+        <button
+          v-if="phase === 'generating'" type="button" class="sp-btn sp-amber" :disabled="pausing"
+          title="Stop the search now and show the best timetable found so far, if any" @click="pause"
+        >
+          {{ pausing ? 'Pausing…' : 'Pause' }}
+        </button>
         <button v-if="reviewing" type="button" class="sp-btn sp-blue" :disabled="!canSchedule" @click="confirmOpen = true">
           Schedule with preview
         </button>
@@ -231,7 +280,7 @@ onBeforeUnmount(() => {
       <section class="sp-right" aria-label="Preview">
         <PreviewPanel
           :phase="phase" :preview="preview" :error="error" :saved="saved" :elapsed="elapsed"
-          :outdated="outdated" :names="names"
+          :outdated="outdated" :names="names" :pausing="pausing" :notice="notice"
         />
       </section>
     </div>
@@ -269,6 +318,8 @@ onBeforeUnmount(() => {
 .sp-btn:disabled { cursor: not-allowed; opacity: .5; box-shadow: none; }
 .sp-green { background: #188038; }
 .sp-green:hover:not(:disabled) { background: #137333; }
+.sp-amber { background: #b45309; }
+.sp-amber:hover:not(:disabled) { background: #92400e; }
 .sp-blue { background: #1a73e8; }
 .sp-blue:hover:not(:disabled) { background: #1765cc; }
 .sp-btn:focus-visible, .sp-divider:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }

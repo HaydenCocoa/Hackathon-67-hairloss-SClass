@@ -737,3 +737,21 @@ Historical discussion; superseded by the implementation record below after the u
   - A preview's search stops after 60 s, then loading and checking are added. It holds the one-at-a-time slot (`GENERATION_BUSY`) for about that long.
   - With less search time, a week that needs a long search may end with `UNKNOWN` (no timetable found yet), or with a valid but less polished timetable (more idle time). Compulsory rules are unchanged. For comparison, the synthetic CS(CYB) week reached OPTIMAL in 91 s; under 60 s it would stop with the best timetable found so far, if any.
 - **Verification:** `load_settings()` returns 60; `test_solver.py` 29 passed; preview page tests 9/9. Not run on Vercel or against hosted Supabase.
+
+## Pause button for scheduling — 13 November 2026
+
+- **Requirement (user):** "add a pause button on the scheduling page, which should stop the current scheduling work". Branch `scheduling-time-limit-1-minute`.
+- **Decision:** a stopped CP-SAT search cannot be resumed, so **Pause stops the search and keeps what it has**: the best complete, valid timetable found so far, or none. Generating again starts a new search. The button is labelled Pause as asked; the page text says what it does.
+- **Change:**
+  - `solver.py`: `StopSignal` (thread-safe; calls CP-SAT `stop_search()` on the running search). `solve_weekly_schedule(..., stop=)` returns `FEASIBLE` with `stopped=True` and a `STOPPED` diagnostic when a valid timetable was found, `UNKNOWN` with `stopped=True` otherwise. A proven `OPTIMAL`/`INFEASIBLE` result is still reported as such. New `ScheduleResult.stopped` field.
+  - `preview.py`: optional `run_id` on generate; new `POST /api/schedules/generate/stop` (admin, same-site, only the admin who started the run). While solving, a watcher checks every 0.5 s for a stop request or a disconnected caller and repeats the stop (CP-SAT can miss a stop sent just as a search starts).
+  - `/admin/schedule`: an amber **Pause** button beside Generate while a preview runs. Pause calls the stop endpoint and waits for the answer (up to 15 s), or, when the stop is not accepted (for example another Vercel instance), stops waiting at once. A paused run with a timetable can be scheduled as usual; a paused run without one keeps the previous preview and says so.
+  - Logging: the `solver_completed` event has `stopped`; new `generation_stop_requested` event; the stop path is traced.
+  - Docs: [preview API](schedule-preview-api.md) (Pause section and `stopped` field), [timetable quality](timetable-quality.md) (preview time), README.
+- **Limits:**
+  - The stop reaches only the server process running the preview. On Vercel a stop request may land on another instance; the page then stops waiting, and the search stops only if the platform passes the closed connection on to the function. Not checked on Vercel.
+  - Time spent loading the week from Supabase is not interrupted; the stop takes effect when the search starts (straight away).
+- **Verification:**
+  - Backend: 7 new solver/endpoint tests and 3 validation cases. A real CP-SAT search with a 30 s limit (a hard "market split" model) stopped about 0.5 s after Pause. Pause during improvement keeps the first valid timetable. Only the same admin can pause; logged-out 401, lecturer 403, wrong origin 403, bad bodies 422. `test_solver.py` + `test_schedule_preview.py`: 93 passed, with the same 2 failures as before this change (provider 401 code, timeout/missing config).
+  - Frontend: 25/25 admin page tests (3 new for Pause); build succeeds.
+  - Headless Edge against the real backend on synthetic data, with a solver that waits for Pause. Checked: Pause shown while generating; paused with no timetable; paused with a timetable kept and Schedule enabled; a refused stop (page stops waiting, and the server stopped its search about 1.5 s later because the connection closed); next Generate runs at once; phone layout. Not run against hosted Supabase or Vercel.

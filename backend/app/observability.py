@@ -18,8 +18,8 @@ LOGGER = logging.getLogger("sclass.scheduling")
 REQUEST_ID: ContextVar[str] = ContextVar("scheduling_request_id", default="-")
 _SETUP_LOCK = Lock()
 _FIELDS = {"http_status", "provider_status", "provider_code", "rpc", "stage", "duration_ms", "code",
-           "pending_count", "placement_count", "row_count", "status", "exception_type", "frames", "saved_count"}
-TRACED_PATHS = {"/api/schedules/generate", "/api/schedules/save"}
+           "pending_count", "placement_count", "row_count", "status", "exception_type", "frames", "saved_count", "stopped"}
+TRACED_PATHS = {"/api/schedules/generate", "/api/schedules/generate/stop", "/api/schedules/save"}
 # Admin rescheduling (scheduling/reschedule.py). The class id in the path is never logged.
 TRACED_PATTERN = re.compile(r"^/api/admin/timetable/[0-9a-fA-F-]{36}/(availability|reschedule)$")
 

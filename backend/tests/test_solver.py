@@ -1,3 +1,6 @@
+import random
+import threading
+import time
 from datetime import timedelta
 
 import pytest
@@ -288,3 +291,88 @@ def test_mvp_sized_week_schedules_six_components_for_forty_shared_students(sampl
     ordered = sorted(result.placements, key=lambda item: item.starts_at)
     assert all(left.ends_at <= right.starts_at for left, right in zip(ordered, ordered[1:]))
     assert len({item.starts_at.date() for item in result.placements}) >= 2
+
+
+# ---- Pause (StopSignal), 13 November 2026 ----
+
+def hard_model():
+    """A market-split model CP-SAT cannot settle in seconds (runs to its time limit when not stopped)."""
+    rng = random.Random(1)
+    model = cp_model.CpModel()
+    chosen = [model.new_bool_var(f"x{i}") for i in range(40)]
+    for _ in range(5):
+        weights = [rng.randrange(100) for _ in chosen]
+        model.add(sum(w * v for w, v in zip(weights, chosen)) == sum(weights) // 2)
+    return model
+
+
+def test_pause_stops_a_running_cp_sat_search_early(snapshot, monkeypatch):
+    monkeypatch.setattr(scheduler, "_build_model", lambda snapshot, candidates: (hard_model(), []))
+    stop = scheduler.StopSignal()
+
+    def press_pause():
+        time.sleep(0.5)
+        while not finished.is_set():  # repeated, like the preview endpoint does
+            stop.request()
+            time.sleep(0.05)
+
+    finished = threading.Event()
+    threading.Thread(target=press_pause, daemon=True).start()
+    try:
+        started = time.perf_counter()
+        result = solve_weekly_schedule(snapshot, SolverSettings(max_time_seconds=30), stop=stop)
+        elapsed = time.perf_counter() - started
+    finally:
+        finished.set()
+    assert elapsed < 10, elapsed  # the search limit was 30 s
+    assert result.status == "UNKNOWN" and result.stopped and not result.has_solution
+    assert result.placements == () and [d.code for d in result.diagnostics] == ["STOPPED"]
+    assert result.statistics.solver_ran
+
+
+def test_pause_before_the_search_starts_runs_no_search(snapshot):
+    stop = scheduler.StopSignal()
+    stop.request()
+    result = solve_weekly_schedule(snapshot, stop=stop)
+    assert result.status == "UNKNOWN" and result.stopped and not result.has_solution
+    assert result.diagnostics[0].code == "STOPPED" and not result.statistics.solver_ran
+
+
+def test_pause_during_improvement_keeps_the_valid_timetable_found_so_far(snapshot):
+    class PauseAtSecondSearch(scheduler.StopSignal):
+        searches = 0
+
+        def attach(self, solver):
+            self.searches += 1
+            if self.searches == 2:
+                self.request()
+            return super().attach(solver)
+
+    stop = PauseAtSecondSearch()
+    result = solve_weekly_schedule(snapshot, SolverSettings(max_time_seconds=10), load_settings().scheduling.quality, stop)
+    assert stop.searches == 2
+    assert result.status == "FEASIBLE" and result.has_solution and result.stopped
+    assert len(result.placements) == result.required_count and result.quality is not None
+    assert result.diagnostics[0].code == "STOPPED"
+
+
+def test_unpaused_results_say_they_were_not_stopped(snapshot):
+    assert solve_weekly_schedule(snapshot).stopped is False
+
+
+def test_stop_signal_reaches_only_the_attached_solver():
+    class FakeSolver:
+        stops = 0
+
+        def stop_search(self):
+            self.stops += 1
+
+    stop, solver = scheduler.StopSignal(), FakeSolver()
+    assert stop.attach(solver)
+    stop.request()
+    stop.request()
+    assert solver.stops == 2 and stop.requested
+    stop.detach()
+    stop.request()
+    assert solver.stops == 2
+    assert not stop.attach(FakeSolver())  # a further search does not start once paused

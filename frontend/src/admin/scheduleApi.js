@@ -3,6 +3,9 @@
 // Scheduling errors arrive as { detail: { code, message, request_id } }; admin API errors as { detail: "text" }.
 import { generateBody, saveBody } from './schedulePreview.js'
 
+/** Thrown when the page stopped waiting for a request (the Pause button). */
+export const PAUSED = 'PAUSED'
+
 export class ScheduleApiError extends Error {
   constructor(message, { code = '', status = 0, requestId = '' } = {}) {
     super(message)
@@ -15,7 +18,7 @@ export class ScheduleApiError extends Error {
 // The session ended: log in again, then come back to this page.
 const loginUrl = () => `/login?next=${encodeURIComponent(window.location.pathname || '/admin')}`
 
-async function call(url, { method = 'GET', body } = {}) {
+async function call(url, { method = 'GET', body, signal } = {}) {
   let response
   try {
     response = await fetch(url, {
@@ -23,8 +26,10 @@ async function call(url, { method = 'GET', body } = {}) {
       headers: { Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) },
       body: body ? JSON.stringify(body) : undefined,
       cache: 'no-store',
+      signal,
     })
-  } catch {
+  } catch (e) {
+    if (signal?.aborted || e?.name === 'AbortError') throw new ScheduleApiError('Scheduling was paused.', { code: PAUSED })
     throw new ScheduleApiError("Can't reach the server. Check that the backend is running, then try again.", { code: 'NETWORK' })
   }
   const requestId = response.headers?.get('X-Request-ID') || ''
@@ -50,8 +55,15 @@ async function call(url, { method = 'GET', body } = {}) {
 export const listIntakes = async () => (await call('/api/admin/intakes')).data
 export const listLecturers = async () => (await call('/api/admin/lecturers')).data
 
-/** Can take a minute or a little longer: the solver's 60 s limit plus loading and checking. */
-export const generatePreview = (week, intakeIds) => call('/api/schedules/generate', { method: 'POST', body: generateBody(week, intakeIds) })
+/**
+ * Can take a minute or a little longer: the solver's 60 s limit plus loading and checking.
+ * runId names the run for stopPreview; aborting signal stops waiting (rejects with code PAUSED).
+ */
+export const generatePreview = (week, intakeIds, { runId, signal } = {}) =>
+  call('/api/schedules/generate', { method: 'POST', body: generateBody(week, intakeIds, runId), signal })
+
+/** Pause: ask the server to stop the run. { stopped: false } means it is not running there (any more). */
+export const stopPreview = (runId) => call('/api/schedules/generate/stop', { method: 'POST', body: { run_id: runId } })
 
 export const savePreview = (preview) => call('/api/schedules/save', { method: 'POST', body: saveBody(preview) })
 

@@ -7,7 +7,20 @@ const uniqueSorted = (ids) => [...new Set(ids.map(String))].sort()
 /** Identifies a selection, so the page can tell when the preview no longer matches it. */
 export const selectionKey = (week, intakeIds) => `${week}|${uniqueSorted(intakeIds).join(',')}`
 
-export const generateBody = (week, intakeIds) => ({ week_start: week, intake_ids: uniqueSorted(intakeIds) })
+/** runId (optional) lets the page pause this run later (POST /api/schedules/generate/stop). */
+export const generateBody = (week, intakeIds, runId) => ({
+  week_start: week, intake_ids: uniqueSorted(intakeIds), ...(runId ? { run_id: runId } : {}),
+})
+
+/** A random UUID naming one Generate press, so that Pause stops that run and no other. */
+export function newRunId(source = globalThis.crypto) {
+  if (typeof source?.randomUUID === 'function') return source.randomUUID()
+  const bytes = source.getRandomValues(new Uint8Array(16))
+  bytes[6] = (bytes[6] & 0x0f) | 0x40 // version 4
+  bytes[8] = (bytes[8] & 0x3f) | 0x80 // variant
+  const hex = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
 
 /** The save request for a preview: its own week, intakes and revision, and every placement unchanged. */
 export const saveBody = (preview) => ({
@@ -22,6 +35,19 @@ const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 /** Headline for a generate response: { tone: success | warning | error | neutral, title, text }. */
 export function outcome(preview) {
   const count = preview.placements.length
+  if (preview.stopped) {
+    return preview.has_solution
+      ? {
+          tone: 'warning',
+          title: `Paused: ${plural(count, 'class', 'classes')} placed (best found so far)`,
+          text: 'Scheduling was paused before the search finished. Every pending class has a room and time that pass all compulsory rules, but a full search might reduce waiting time. You can schedule this timetable, or generate again to search for longer.',
+        }
+      : {
+          tone: 'neutral',
+          title: 'Scheduling paused',
+          text: 'The search was paused before it found a complete timetable. Nothing was saved. Generate the preview again to start over.',
+        }
+  }
   if (preview.has_solution) {
     return {
       tone: 'success',
