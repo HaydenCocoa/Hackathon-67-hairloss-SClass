@@ -57,11 +57,6 @@ function showToast(text) {
 }
 
 async function loadLecturers() {
-  lecturers.value = [
-    { id: '3f552573-e5d9-4900-8213-b07fbef13c68', name: 'Ahmad Hakim' }
-  ];
-  lecturerId.value = '3f552573-e5d9-4900-8213-b07fbef13c68';
-    
   try {
     lecturers.value = await listLecturers()
     let saved = ''
@@ -153,7 +148,6 @@ onBeforeUnmount(() => clearTimeout(toastTimer))
   <div class="lecturer">
     <header class="lc-topbar">
       <div class="lc-brand">
-        <a class="lc-back" href="#main">← Main menu</a>
         <span class="lc-wordmark">
           <span class="lc-sr">{{ props.appName }}</span>
           <span v-for="(ch, i) in [...props.appName]" :key="i" :class="'lc-c' + (i % 4)" aria-hidden="true">{{ ch }}</span>
