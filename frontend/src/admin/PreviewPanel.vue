@@ -85,7 +85,7 @@ const dayTitle = (iso) => days.value.find((day) => day.iso === iso)?.label || is
     <div v-if="phase === 'generating'" class="pp-empty" aria-busy="true">
       <span class="pp-spinner" aria-hidden="true"></span>
       <h2>Generating the preview… <span class="pp-clock">{{ clock }}</span></h2>
-      <p>Placing every pending class of the selected intakes while keeping existing classes fixed. This can take up to about five minutes.</p>
+      <p>Placing every pending class of the selected intakes while keeping existing classes fixed. This can take a minute or a little longer.</p>
     </div>
 
     <div v-else-if="!preview" class="pp-empty">

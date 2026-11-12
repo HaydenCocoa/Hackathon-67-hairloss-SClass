@@ -402,7 +402,7 @@ Historical discussion; superseded by the implementation record below after the u
   - Confirm the two interpretations (gap scope, capacity-based auditorium rule).
   - Decide whether to add a "fewer days on campus" preference.
   - Check preview time on hosting.
-- **Time limit raised (12 November 2026):** at the user's request `scheduling.solver.max_time_seconds` is now 120 s (was 10 s). **Raised again to 280 s on 13 November 2026** (see that entry). An unlimited value is not supported (0 and infinity are rejected at startup). With preferences on, a preview can take up to about 2 minutes plus loading time, holding the one-at-a-time slot.
+- **Time limit raised (12 November 2026):** at the user's request `scheduling.solver.max_time_seconds` is now 120 s (was 10 s). **Raised again to 280 s on 13 November 2026, then set to 60 s the same day** (see those entries). An unlimited value is not supported (0 and infinity are rejected at startup). With preferences on, a preview can take up to about 2 minutes plus loading time, holding the one-at-a-time slot.
 
 ## `main` merge repair — 12 November 2026
 
@@ -724,3 +724,16 @@ Historical discussion; superseded by the implementation record below after the u
   - If loading the week from Supabase takes longer than about 20 s, Vercel stops the request at 300 s. The page then shows the `SERVER_TIMEOUT` message.
   - Vercel notes that idle HTTP/1.1 connections may be closed by network layers during long requests. Not checked on the live site.
 - **Verification:** the configuration loads with the new value (`load_settings()`), and the preview tests pass. Not run on Vercel.
+
+## Scheduling time limit set to 1 minute — 13 November 2026
+
+- **Requirement (user):** "change back the config time for scheduling to 1 minutes", on a new branch (`scheduling-time-limit-1-minute`).
+- **Change:**
+  - `Config/config.json` `scheduling.solver.max_time_seconds` is now **60** (was 280 from the entry above).
+  - `/admin/schedule` now says a preview "can take a minute or a little longer".
+  - `test_solver.py` expects 60. The docs were updated: timetable quality, preview API, CP-SAT, README and Vercel deployment.
+  - `vercel.json` is unchanged.
+- **Effect:**
+  - A preview's search stops after 60 s, then loading and checking are added. It holds the one-at-a-time slot (`GENERATION_BUSY`) for about that long.
+  - With less search time, a week that needs a long search may end with `UNKNOWN` (no timetable found yet), or with a valid but less polished timetable (more idle time). Compulsory rules are unchanged. For comparison, the synthetic CS(CYB) week reached OPTIMAL in 91 s; under 60 s it would stop with the best timetable found so far, if any.
+- **Verification:** `load_settings()` returns 60; `test_solver.py` 29 passed; preview page tests 9/9. Not run on Vercel or against hosted Supabase.
