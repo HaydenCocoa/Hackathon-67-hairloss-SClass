@@ -2,7 +2,7 @@
 
 Implemented and verified locally: 12 November 2026, branch `feature-login`. **Not run against the hosted Supabase project.**
 
-Related: [backend record](agents.md), [checklist](../../task_hayden.md), [scheduling preview](schedule-preview-api.md), [timetable saving](timetable-saving.md).
+Related: [backend record](agents.md), [scheduling preview](schedule-preview-api.md), [timetable saving](timetable-saving.md).
 
 ## Requirement
 

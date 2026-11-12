@@ -6,7 +6,7 @@ Last updated: 12 November 2026 (Asia/Kuala_Lumpur).
 
 This is the main record for backend requirements, decisions, implemented changes, planned work, verification, and unresolved questions. Keep it updated whenever backend work changes. Put detailed notes in separate Markdown files in this directory and link them here. Clearly distinguish implemented behavior from proposals and plans.
 
-The user requested this convention on 10 November 2026. Repository-level `AGENTS.md` records it for future work. The detailed development checklist remains in [task_hayden.md](../../task_hayden.md).
+The user requested this convention on 10 November 2026. Repository-level `AGENTS.md` records it for future work. The separate checklist `task_hayden.md` was removed on 12 November 2026 at the user's request because the work is nearly done. Its open items are now in [Remaining work](#remaining-work) below, which is the single list of what is left.
 
 ## Project direction
 
@@ -24,7 +24,8 @@ Source: [Notes / Hackathon](https://app.notion.com/p/4117da63706d807095f2fbdab33
 
 - `Config/config.json` controls teaching weekdays and opening hours.
 - Initial hours: Monday–Friday, 08:30–18:00, `Asia/Kuala_Lumpur`.
-- A class may start at any time if its full duration fits inside opening hours. No fixed start-time grid, mandatory breaks, or travel buffer.
+- A class may start at any whole minute (since 12 November 2026) if its full duration fits inside opening hours. No fixed start-time grid or travel buffer.
+- Two bookings (classes or meetings) that share a room, lecturer or student must be at least `min_gap_minutes` (15) apart. Added 12 November 2026; the scope, including meetings, was confirmed the same day.
 - Omitted weekdays are closed. Explicit closure dates override weekly hours; the initial closure list is empty.
 - Timestamps must include timezone information. Calendar eligibility is separate from resource availability.
 
@@ -32,17 +33,28 @@ See [step 1: configurable teaching calendar](scheduling-calendar.md) for the con
 
 ## Current implementation
 
-The existing backend provides health/configuration checks, a Supabase read-connectivity check, frontend serving, and student profile/timetable reads. These are existing components, not newly completed scheduling milestones. Authentication integration and trusted booking writes remain future work.
+Status on 12 November 2026. The dated entries further down give the detail and test results.
 
-Step 1 now adds validated scheduling settings, a reusable calendar helper, and initialization on FastAPI app state. Invalid calendar settings fail startup. The helper accepts arbitrary start timestamps and checks the complete interval against configured local opening hours. It does not generate classes or check lecturer/student/room conflicts.
+- **Platform:**
+  - Health and configuration checks, and frontend serving.
+  - Login at `/login` with Supabase Auth and httpOnly session cookies; one role per account (admin > lecturer > student). See [login](login.md).
+  - Role-based access on every API.
+- **Scheduling engine (steps 1–8):**
+  - Configurable teaching calendar.
+  - Database-defined weekly teaching plans with stable occurrences.
+  - Backend-owned data loader. Its direct PostgREST reads are not yet verified: 10 older loader/preview tests still fail.
+  - Shared booking validator and candidate start ranges.
+  - Joint CP-SAT generation that improves the timetable with the configured preferences (student waiting time, lecturer gaps, room fit). The 15-minute gap, whole-minute starts and the auditorium rule are compulsory. See [timetable quality](timetable-quality.md).
+- **Preview and save (steps 9–10):** admin-only, local-development API and test page.
+  - The save rechecks the week and writes all classes in one insert, with an audit row per class ([timetable saving](timetable-saving.md), [save audit](save-audit.md)).
+  - There is no lock shared with the other writers.
+- **Rescheduling (step 11), partly built:**
+  - `rescheduled` status ([details](rescheduled-status.md)).
+  - The lecturer page's move endpoint, reviewed on 12 November with open findings ([review](lecturer-reschedule-review.md)).
+  - The admin page's reschedule database function, fixed on 12 November for the removed room column and the `rescheduled` status.
+  - Cancellation and future reservations are not built.
 
-Step 2 adds database-defined weekly teaching plans, automatic expansion into stable occurrences, optional booking links, cancellation/move integrity, and an internal paginated weekly-demand reader. It works with or without `class_sections.required_room_type`. The user confirmed Step 2 complete on 11 November 2026. The original design was verified locally on 10 November; this record holds no automated test results for the 11 November compatibility edit. See [implemented weekly teaching plans](weekly-teaching-plans.md) for setup, interfaces, decisions, and limits.
-
-Steps 4-7 add the validated weekly snapshot, shared booking validator, unrestricted candidate ranges, and complete CP-SAT feasibility generation with post-solve verification. Step 8 quality optimization is postponed. Step 9 exposes read-only generation through a local-development HTTP API and a service-hosted test page; these are verified locally. Step 10 adds saving a reviewed preview to `class_sessions` through the same local-development API and page (see [timetable saving](timetable-saving.md)). Login with Supabase Auth and role-based access were added on 12 November ([login](login.md)), and the save audit followed the same day ([save audit](save-audit.md)); a database-transactional recheck-and-commit remains future work.
-
-The step 4 loader was changed on 11 November at the user's direction: the backend now reads existing Supabase tables/views and assembles its own scheduling input. It no longer invokes the optional historical snapshot RPC migration. Verification of these direct reads is pending; see [the updated loader record](scheduling-data-loader.md). The separate PostgREST requests are not one transaction snapshot, so any later booking write must revalidate transactionally.
-
-No database schema or hosted data was changed for step 1. No frontend change was needed.
+The separate PostgREST reads are not one transaction snapshot, so any booking write must recheck before writing.
 
 ## Development roadmap and status
 
@@ -56,9 +68,9 @@ No database schema or hosted data was changed for step 1. No frontend change was
 | 6 | Feasible start ranges and suitable rooms without preset teaching slots | Complete and verified locally; no new migration |
 | 7 | CP-SAT generation satisfying all mandatory constraints and reporting accurate solver status | Complete and verified locally; no new migration |
 | 8 | Configurable objectives for student gaps, lecturer gaps, and room utilization | Implemented and verified locally 12 Nov ([timetable quality](timetable-quality.md)), with the compulsory 15-minute gap, whole-minute starts and auditorium rule |
-| 9 | Selected-intake/group preview API and test page including assignments, diagnostics, and scope-bound input revision; quality deferred | Complete and verified locally; direct localhost/development access only |
+| 9 | Selected-intake/group preview API and test page including assignments, diagnostics, quality measurements, and scope-bound input revision | Complete and verified locally; admin login plus direct localhost/development access only |
 | 10 | Authorized, transactional commits with revalidation, concurrency control, audit, and retry protection | Save implemented and verified locally on 11 Nov (recheck-then-single-insert). Admin login required since 12 Nov ([login](login.md)); save audit implemented 12 Nov ([save audit](save-audit.md)). Not run against hosted Supabase |
-| 11 | Safe rescheduling, cancellation, and fixed future reservations | Planned. `rescheduled` booking status added 12 Nov ([details](rescheduled-status.md)); hosted SQL run pending |
+| 11 | Safe rescheduling, cancellation, and fixed future reservations | In progress. `rescheduled` status added 12 Nov ([details](rescheduled-status.md)). Lecturer move endpoint exists but misses compulsory rules ([review](lecturer-reschedule-review.md)). Admin reschedule function fixed 12 Nov. Cancellation and reservations not built. Hosted SQL runs pending |
 | 12 | Verified requirements-to-generation-to-commit-to-retrieval workflow and acceptance scenarios | Planned |
 
 ## Verification and completion record
@@ -75,13 +87,56 @@ No database schema or hosted data was changed for step 1. No frontend change was
 - The restricted integration-test run stalled in Windows asyncio local socket creation. Stopped those runs and reran with approved local networking; the full suite passed in 10.29 seconds. Tests use a local stand-in, not the hosted Supabase project.
 - `git diff --check` passed. Step 1 is complete; timetable generation itself remains planned.
 
-## Open items and limits
+## Remaining work
 
-- No further user input is needed to finish step 1.
-- No holiday dates have been supplied; `closed_dates` is empty and does not automatically import public holidays.
-- Initial opening windows are same-day only; overnight opening is not implemented.
-- Full availability, timetable generation, booking persistence, permissions, and concurrency protection are not completed by the calendar milestone.
-- Step 7 uses integer microseconds without preset teaching slots. Quality optimization is postponed. Local preview generation and saving are implemented; login-based authorization, save auditing and a database-transactional commit remain open (step 10 follow-ups).
+The single list of what is left (moved here from the removed `task_hayden.md` on 12 November 2026). The dated entries below give the background.
+
+**Step 11: rescheduling, cancellation and reservations**
+- Fix the lecturer move endpoint's findings, mainly by reusing the snapshot, `BookingValidator` (`mode="reschedule"`) and `CandidateGenerator` instead of its own checks. See the [review](lecturer-reschedule-review.md):
+  - opening hours
+  - the 15-minute gap
+  - room type and the auditorium rule
+  - lock and transaction
+  - past classes
+- Find and rank other times for one class, keeping every other class fixed.
+- Save a replacement and its history in one transaction, and keep the original if the replacement fails.
+- Deliberate cancellation that frees the class's resources.
+- Future reservations (lecturer, students, room) that later generation treats as fixed. Keep "published" separate from "occupies resources".
+- Permission check on every cancel, reschedule and reservation.
+- Admin reschedule function: add opening hours and the 15-minute gap.
+
+**Step 12: verify the whole workflow.** No item is started:
+- The acceptance scenarios: cross-intake students, the only suitable lab, no big-enough room, a meeting clash, a reservation preserved, repeated generation, cancelled lessons, freed resources, two requests for one resource, a failed replacement, a stale preview, an unresolved search, a missing placement.
+- Reading the timetable back after a save.
+- Rechecking the output with the validator.
+- Two saves at the same time.
+
+**Step 10 leftover:** one lock or rule that every writer of bookings follows. The save, the admin function, the lecturer endpoint and the dashboard do not share one today.
+
+**Step 4 / tests:**
+- Verify the direct-read loader against real data.
+- Update the 10 older loader/preview tests that still expect the removed RPC or the `required_room_type` field.
+
+**Deferred by the user (12 November 2026, not a priority; scheduling stays as it is)**
+- A "fewer days on campus" preference.
+- Course-offering end dates.
+
+**Hosted setup (project owner)**
+- Run these migrations on Supabase. The user asked for an explanation first: see [migrations to apply](hosted-migrations.md).
+  - `202611100002_remove_required_room_type`
+  - `202611120001_class_session_rescheduled_status`
+  - `202611120002_save_audit`
+  - `202611120003_admin_reschedule_fixes`
+  - and `202611110001_admin_timetable` if it is not applied yet
+
+**Settled by the user on 12 November 2026 (no action)**
+- Supabase accounts: the data is hackathon sample data, so no extra account work is planned.
+- Vercel: the user reports that setup is complete. Vercel is used **for production only**; development stays local. Because of that, the scheduling preview and save (local-development only) are not available on Vercel; see [Vercel deployment](vercel-deployment.md).
+- The old course seed, fresh setup (`schema.sql` still has `required_room_type`) and the ERD will not be updated for the removed room column.
+
+**Known limits**
+- `closed_dates` is empty; public holidays are not imported. Opening windows are same-day only.
+- The scheduling input is several reads, not one database snapshot.
 
 ## Step 2 discussion — 10 November 2026
 
@@ -380,3 +435,55 @@ Historical discussion; superseded by the implementation record below after the u
   - The lecturer endpoint still writes without validation or audit (step 11).
   - The validator fixture still needs fixing.
   - The unused `load_scheduling_data` RPC still filters only `scheduled`.
+
+## Checklist removal, decisions and step 11 review — 12 November 2026
+
+- Work done on `main` (after PR #15), uncommitted, at the user's request.
+- **Checklist removed:** `task_hayden.md` was deleted because the work is nearly done. Its open items moved to [Remaining work](#remaining-work). Links to it were removed from `AGENTS.md`, the README and seven backend notes.
+- **Decisions:** the user answered "yes" to all four open questions:
+  - The 15-minute gap covers rooms, lecturers and students, including meetings.
+  - The auditorium rule is judged by capacity, not availability.
+  - The "fewer days on campus" preference and course-offering end dates were first recorded as accepted. Later the same day the user **deferred both** as not a priority, keeping scheduling as it is.
+  - Recorded in `AGENTS.md`, [timetable quality](timetable-quality.md) and [offering end dates](offering-end-dates-and-room-policy.md).
+- **Step 11 review:** the lecturer page's rescheduling was reviewed. The 13 findings are in the [review](lecturer-reschedule-review.md). High:
+  - no opening-hours check;
+  - no 15-minute gap;
+  - no room-type or auditorium check (and the page lists only classrooms);
+  - check-then-write without a lock or transaction.
+  - The recommended fix is to reuse the snapshot, validator and candidate generator. Apart from the item below, the findings are not fixed.
+- **Fixed:**
+  - The lecturer timetable returned a hard-coded `intake_code` ("CS-2024") and `student_count` (30). It now returns the real intake code and group size (`group_facts` in `lecturer.py`), with a new test.
+  - The admin reschedule database function read the removed `required_room_type` column (it fails once the removal patch is run). It also refused to move `rescheduled` classes and ignored them as clashes. The new migration [`202611120003_admin_reschedule_fixes.sql`](../../supabase/migrations/202611120003_admin_reschedule_fixes.sql) replaces it:
+    - room type from the course type, following `scheduling.room_compatibility`, plus the auditorium rule;
+    - both active statuses;
+    - a moved class is marked `rescheduled`, with the status recorded in the audit.
+    - Opening hours and the 15-minute gap are still not checked there.
+  - `202611110001_admin_timetable.sql` previously failed on a database where the removal patch had already run. Its view now includes the legacy column only while the table has it.
+  - The admin page's token box is labelled optional (the login session is used), rescheduled classes can be edited, and the dead "Main menu" link is gone.
+  - README: removed the leftover merge-conflict text; updated the admin section (`/admin`, login, migrations), the start-time and gap rule, quality, login and the save audit.
+  - Lecturer and student page READMEs: addresses, login and backend paths.
+  - Stale "Current implementation" and "Open items" sections of this record were rewritten.
+  - `docs/New Text Document.txt` (intake and group plan) is already implemented by `supabase/seed_students.sql`. One difference: the note lists the last cohort as `APD1F2507CS, APD2F2606CS(CYB)`, but the seed uses `APD2F2606CS` (without `(CYB)`), which looks like the intended value. The note was left as it is.
+- **Verification:**
+  - New database test `admin-reschedule-fixes.test.cjs`: 24 checks passed. It runs the removal patch both before and after the admin migration, and confirms the old function failed after the removal.
+  - All 10 database test sets pass.
+  - Backend auth/lecturer tests: 26 passed.
+  - Full backend suite: 338 passed, 10 failed, 1 skipped. Before this work: 337 passed with the same 10 failures (the older loader/preview tests). The extra pass is the new lecturer test.
+  - Frontend: 12/12 lecturer and 7/7 login tests; `npm run build` succeeds.
+  - 130 local Markdown links resolve; `git diff --check` passes.
+  - Not run against hosted Supabase or in a real browser.
+
+## Deferred decisions, hosted setup scope and migration guide — 12 November 2026
+
+- **Decisions:** the user deferred the "fewer days on campus" preference and course-offering end dates as not a priority, so scheduling stays as it is. Recorded in `AGENTS.md`, [timetable quality](timetable-quality.md) and [offering end dates](offering-end-dates-and-room-policy.md).
+- **Hosted setup:**
+  - Supabase account linking and the seed/fresh-setup/ERD updates are not needed (hackathon sample data).
+  - The user reports that Vercel is set up and is used for production only. Scheduling previews and saves therefore stay on the local backend. Recorded in [Vercel deployment](vercel-deployment.md).
+- **Migrations:** before the user runs them, added [hosted-migrations.md](hosted-migrations.md), which covers:
+  - what each of the five migrations does;
+  - the run order;
+  - which ones can be rerun;
+  - data loss (the room-type column) and a private backup;
+  - what breaks without them.
+
+  Also added the read-only status query [hosted-migrations-status.sql](hosted-migrations-status.sql). It was checked on local PostgreSQL (PGlite) before and after applying all five. Its first version wrongly reported `rescheduled` as applied on a fresh `schema.sql`, so it now also checks the trigger function. Nothing was run on hosted Supabase.

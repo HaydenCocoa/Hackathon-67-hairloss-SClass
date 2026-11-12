@@ -331,6 +331,23 @@ def test_admin_can_read_any_record_and_reschedule_on_behalf(supabase, frontend):
     assert len(logs) == 1 and logs[0]["action"] == "reschedule" and logs[0]["changed_by"] == uid(1)
 
 
+def test_lecturer_timetable_shows_the_real_intake_code_and_group_size(supabase, frontend, monkeypatch):
+    settings, _ = supabase
+    row = {**TABLES["class_session_details"][0], "lecturer_id": uid(201), "ends_at": "2026-11-25T03:30:00+00:00",
+           "course_code": "C1", "course_type": "lecture", "course_name": "Subject"}
+    monkeypatch.setitem(TABLES, "class_session_details", [row])
+    monkeypatch.setitem(TABLES, "intakes", [{"id": uid(601), "intake_code": "APU1F2611CS"}])
+    monkeypatch.setitem(TABLES, "student_intakes", [
+        {"student_id": uid(301 + n), "intake_id": uid(601), "group_number": 1} for n in range(3)
+    ] + [{"student_id": uid(399), "intake_id": uid(601), "group_number": 2}])
+    with client(settings, frontend) as c:
+        login(c, "lecturer@example.test")
+        response = c.get(f"/api/lecturers/{uid(201)}/timetable", params={"start": "2026-11-23", "end": "2026-11-29"})
+    assert response.status_code == 200, response.text
+    [session] = response.json()
+    assert (session["intake_code"], session["student_count"]) == ("APU1F2611CS", 3)
+
+
 def test_admin_api_accepts_the_login_session(supabase, frontend):
     """The admin page works for a logged-in admin without pasting a Supabase token."""
     settings, state = supabase

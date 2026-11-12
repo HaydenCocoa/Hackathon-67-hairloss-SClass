@@ -2,7 +2,7 @@
 
 Implemented and verified locally: 12 November 2026, branch `backend-enhancement`. **Not run against the hosted Supabase project.** This replaces the plan written earlier the same day.
 
-Related: [CP-SAT solver](cp-sat-scheduling.md), [booking validation](booking-validation.md), [candidate ranges](candidate-generation.md), [preview API](schedule-preview-api.md), [backend record](agents.md), [checklist](../../task_hayden.md).
+Related: [CP-SAT solver](cp-sat-scheduling.md), [booking validation](booking-validation.md), [candidate ranges](candidate-generation.md), [preview API](schedule-preview-api.md), [backend record](agents.md).
 
 ## Requirement
 
@@ -22,10 +22,12 @@ Make valid timetables comparable with meaningful measurements and let configured
 | Q8 | Branch | Current branch, `backend-enhancement`. |
 | New | Gap between classes | **Compulsory: 15 minutes** between two bookings that share a room, a lecturer or a student. Applies to new classes against each other and against existing classes and meetings, on both sides. Set by `min_gap_minutes`. |
 
-Interpretations made during implementation (please confirm):
+Interpretations made during implementation, **confirmed by the user on 12 November 2026**:
 
 - The 15-minute gap applies to every shared resource (room, lecturer, student), including meetings, not only to students.
 - "Other classroom cannot handle" is judged by **capacity, not availability**: if any active, permitted, non-auditorium room has enough seats, the auditorium is refused even when that room is busy at the time.
+
+A **"fewer days on campus" preference** (see risk 2 below) was discussed on 12 November 2026 and **deferred by the user**: it is not a priority, and scheduling stays as it is.
 
 ## Compulsory rules (always enforced)
 
@@ -148,7 +150,7 @@ Local synthetic data only; the hosted Supabase project was not contacted.
 ## Risks and limits
 
 1. **Preview time.** With preferences on, a preview usually uses the whole time limit (now 120 s) because proving the best answer is hard even when it has been found. The admin waits that long, other previews and saves get `GENERATION_BUSY` meanwhile, and a closed browser does not stop the search. The development page is local-only, so hosted function limits do not apply to it today.
-2. **Spreading across days.** Minimizing waiting time favours one class per day (see the example: student-days 80 → 200). That has no idle time but means more days on campus. A "fewer days" or "balanced days" preference is not implemented (Q4 deferred).
+2. **Spreading across days.** Minimizing waiting time favours one class per day (see the example: student-days 80 → 200). That has no idle time but means more days on campus. A "fewer days" preference is deferred (12 November 2026, not a priority).
 3. **Repeatability.** The improvement search stops on wall-clock time, so two runs can return different (equally valid) timetables.
 4. **Capacity, not availability,** decides whether an auditorium is allowed. A large class may therefore be unschedulable if the only big-enough classroom is busy all week, even though the auditorium is free.
 5. **Existing bookings** that break the new gap or auditorium rule are not changed or reported; only new placements must comply.

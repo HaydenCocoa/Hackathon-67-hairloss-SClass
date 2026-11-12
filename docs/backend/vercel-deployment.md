@@ -1,8 +1,10 @@
 # Vercel deployment (services)
 
-Prepared: 12 November 2026, branch `feature-vercel-services`. **Configuration only — not yet deployed, and `vercel dev` has not been run** (the Vercel CLI is not installed on the development machine). Service names, public paths and the absence of bindings are **pending the user's confirmation**.
+Prepared: 12 November 2026, branch `feature-vercel-services`.
 
-Related: [backend record](agents.md), [checklist](../../task_hayden.md), [login](login.md), [scheduling preview](schedule-preview-api.md).
+**Update, 12 November 2026:** the user reports that the Vercel setup is complete. Vercel is used **for production only**; development and testing stay on the local machine, so `vercel dev` and preview deployments are not part of the workflow. This record has not independently checked the live deployment. Because the scheduling preview and save are local-development tools, timetable generation and saving are **not available on Vercel** (see "Behaviour differences" below). Generate and save timetables from a local backend connected to the same Supabase project.
+
+Related: [backend record](agents.md), [login](login.md), [scheduling preview](schedule-preview-api.md).
 
 ## Requirement
 

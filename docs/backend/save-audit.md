@@ -2,7 +2,7 @@
 
 Implemented and verified locally: 12 November 2026, branch `backend-enhancement`. **The migration has not been run on the hosted Supabase project.**
 
-Related: [timetable saving](timetable-saving.md), [login](login.md), [backend record](agents.md), [checklist](../../task_hayden.md).
+Related: [timetable saving](timetable-saving.md), [login](login.md), [backend record](agents.md).
 
 ## Requirement
 

@@ -1,3 +1,4 @@
+import asyncio
 import os
 import httpx
 from datetime import date, datetime, timedelta, timezone
@@ -132,6 +133,21 @@ async def load_students(db: "Supabase", moving: dict) -> tuple[list[str], set]:
 
 # Suggested times are offered between 08:00 and 19:00, every 30 minutes.
 DAY_START_MIN, DAY_END_MIN, STEP_MIN = 8 * 60, 19 * 60, 30
+
+
+async def group_facts(db: "Supabase", rows: list[dict]) -> tuple[dict[str, str], dict[tuple[str, int], int]]:
+    """Intake codes by intake id, and the real number of students in each (intake, group) shown."""
+    groups = sorted({(str(r["intake_id"]), r["group_number"]) for r in rows if r.get("intake_id")})
+    if not groups:
+        return {}, {}
+    intake_ids = sorted({intake for intake, _ in groups})
+    intakes, *members = await asyncio.gather(
+        db.get("intakes", [("select", "id,intake_code"), ("id", f"in.({','.join(intake_ids)})")]),
+        *(db.get("student_intakes", [("select", "student_id"), ("intake_id", f"eq.{intake}"),
+                                      ("group_number", f"eq.{group}")]) for intake, group in groups),
+    )
+    codes = {str(r["id"]): r["intake_code"] for r in intakes}
+    return codes, {group: len(rows_) for group, rows_ in zip(groups, members)}
 
 
 async def suggest_slots(db: "Supabase", moving: dict, lecturer_id: str, wanted_day: date, wanted_min: int,
@@ -336,6 +352,7 @@ def create_lecturer_router(settings: SupabaseSettings) -> APIRouter:
                 query_params.append(("starts_at", f"lt.{day_start_utc(last_day + timedelta(days=1))}"))
 
             data = await db.get("class_session_details", query_params)
+            intake_codes, group_sizes = await group_facts(db, data)
 
             results = []
             now_utc = datetime.now(timezone.utc)
@@ -362,9 +379,9 @@ def create_lecturer_router(settings: SupabaseSettings) -> APIRouter:
                 "course_code": s["course_code"],
                 "course_type": s["course_type"],
                 "course_name": s["course_name"],
-                "intake_code": "CS-2024",
+                "intake_code": intake_codes.get(str(s.get("intake_id")), "Unknown intake"),
                 "group_number": s["group_number"],
-                "student_count": 30,
+                "student_count": group_sizes.get((str(s.get("intake_id")), s["group_number"]), 0),
                 "duration_minutes": s["duration_minutes"],
                 "required_room_type": s.get("required_room_type", "classroom"),
                 "status": s["status"],
