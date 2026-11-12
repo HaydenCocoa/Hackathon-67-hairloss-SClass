@@ -45,12 +45,13 @@ Status on 12 November 2026. The dated entries further down give the detail and t
   - Backend-owned data loader. Its direct PostgREST reads are not yet verified: 10 older loader/preview tests still fail.
   - Shared booking validator and candidate start ranges.
   - Joint CP-SAT generation that improves the timetable with the configured preferences (student waiting time, lecturer gaps, room fit). The 15-minute gap, whole-minute starts and the auditorium rule are compulsory. See [timetable quality](timetable-quality.md).
-- **Preview and save (steps 9–10):** admin-only, local-development API and test page.
+- **Preview and save (steps 9–10):** admin-only API, usable in production (Vercel) since 12 November 2026 ([details](vercel-deployment.md#scheduling-on-vercel-since-12-november-2026)); the test page stays local-development only.
   - The save rechecks the week and writes all classes in one insert, with an audit row per class ([timetable saving](timetable-saving.md), [save audit](save-audit.md)).
   - There is no lock shared with the other writers.
 - **Rescheduling (step 11), partly built:**
   - `rescheduled` status ([details](rescheduled-status.md)).
-  - The lecturer page's move endpoint, reviewed on 12 November with open findings ([review](lecturer-reschedule-review.md)).
+  - The lecturer page's move endpoint: reviewed on 12 November, re-checked after the teammate's update, then fixed the same day. It now uses the engine's rules and `lecturer_reschedule_class` (one transaction under the lock), and errors are safe ([fix](lecturer-reschedule-review.md#fix-12-november-2026)). IDs are still not validated.
+  - The admin page's Reschedule dialog and its availability/reschedule API ([admin rescheduling API](admin-reschedule-api.md)).
   - The admin page's reschedule database function, fixed on 12 November for the removed room column and the `rescheduled` status.
   - Cancellation and future reservations are not built.
 
@@ -68,7 +69,7 @@ The separate PostgREST reads are not one transaction snapshot, so any booking wr
 | 6 | Feasible start ranges and suitable rooms without preset teaching slots | Complete and verified locally; no new migration |
 | 7 | CP-SAT generation satisfying all mandatory constraints and reporting accurate solver status | Complete and verified locally; no new migration |
 | 8 | Configurable objectives for student gaps, lecturer gaps, and room utilization | Implemented and verified locally 12 Nov ([timetable quality](timetable-quality.md)), with the compulsory 15-minute gap, whole-minute starts and auditorium rule |
-| 9 | Selected-intake/group preview API and test page including assignments, diagnostics, quality measurements, and scope-bound input revision | Complete and verified locally; admin login plus direct localhost/development access only |
+| 9 | Selected-intake/group preview API and test page including assignments, diagnostics, quality measurements, and scope-bound input revision | Complete and verified locally. Admin login; production (Vercel) use since 12 Nov, live deployment not checked. Test page local only |
 | 10 | Authorized, transactional commits with revalidation, concurrency control, audit, and retry protection | Save implemented and verified locally on 11 Nov (recheck-then-single-insert). Admin login required since 12 Nov ([login](login.md)); save audit implemented 12 Nov ([save audit](save-audit.md)). Not run against hosted Supabase |
 | 11 | Safe rescheduling, cancellation, and fixed future reservations | In progress. `rescheduled` status added 12 Nov ([details](rescheduled-status.md)). Lecturer move endpoint exists but misses compulsory rules ([review](lecturer-reschedule-review.md)). Admin reschedule function fixed 12 Nov. Cancellation and reservations not built. Hosted SQL runs pending |
 | 12 | Verified requirements-to-generation-to-commit-to-retrieval workflow and acceptance scenarios | Planned |
@@ -92,18 +93,21 @@ The separate PostgREST reads are not one transaction snapshot, so any booking wr
 The single list of what is left (moved here from the removed `task_hayden.md` on 12 November 2026). The dated entries below give the background.
 
 **Step 11: rescheduling, cancellation and reservations**
-- Fix the lecturer move endpoint's findings, mainly by reusing the snapshot, `BookingValidator` (`mode="reschedule"`) and `CandidateGenerator` instead of its own checks. See the [review](lecturer-reschedule-review.md):
+- Admin page: **done 12 November 2026.** A Reschedule dialog backed by the availability and reschedule endpoints, which use the engine's rules ([admin rescheduling API](admin-reschedule-api.md)).
+- Lecturer move endpoint: **switched to `scheduling/reschedule.py` and `lecturer_reschedule_class` on 12 November 2026** ([fix](lecturer-reschedule-review.md#fix-12-november-2026)), fixing opening hours, room rules, locking, error text and the lost intake code/group size. Still open: validate IDs (finding 9). Apply migration `202611120004` on hosted Supabase. The review's original list was:
   - opening hours
   - the 15-minute gap
   - room type and the auditorium rule
   - lock and transaction
   - past classes
-- Find and rank other times for one class, keeping every other class fixed.
-- Save a replacement and its history in one transaction, and keep the original if the replacement fails.
+- Rank other times for one class. Free times are now listed per room and day (admin availability endpoint), but they are not ranked yet.
+- Save a replacement and its history in one transaction, keeping the original if the replacement fails: done for admin moves (the database function); still open for the lecturer endpoint.
 - Deliberate cancellation that frees the class's resources.
 - Future reservations (lecturer, students, room) that later generation treats as fixed. Keep "published" separate from "occupies resources".
 - Permission check on every cancel, reschedule and reservation.
-- Admin reschedule function: add opening hours and the 15-minute gap.
+- Admin reschedule database function: add opening hours and the 15-minute gap. The new admin endpoint checks them before calling it, but the older `PUT /api/admin/timetable/{id}` does not.
+
+**Production check:** run one preview, one save and one admin move on the live Vercel site, and check the function's run time in Vercel's logs and that the project uses Fluid compute ([details](vercel-deployment.md#scheduling-on-vercel-since-12-november-2026)).
 
 **Step 12: verify the whole workflow.** No item is started:
 - The acceptance scenarios: cross-intake students, the only suitable lab, no big-enough room, a meeting clash, a reservation preserved, repeated generation, cancelled lessons, freed resources, two requests for one resource, a failed replacement, a stale preview, an unresolved search, a missing placement.
@@ -127,11 +131,12 @@ The single list of what is left (moved here from the removed `task_hayden.md` on
   - `202611120001_class_session_rescheduled_status`
   - `202611120002_save_audit`
   - `202611120003_admin_reschedule_fixes`
+  - `202611120004_lecturer_reschedule` (lecturer moves in one transaction; needed by the lecturer page since 12 November 2026)
   - and `202611110001_admin_timetable` if it is not applied yet
 
 **Settled by the user on 12 November 2026 (no action)**
 - Supabase accounts: the data is hackathon sample data, so no extra account work is planned.
-- Vercel: the user reports that setup is complete. Vercel is used **for production only**; development stays local. Because of that, the scheduling preview and save (local-development only) are not available on Vercel; see [Vercel deployment](vercel-deployment.md).
+- Vercel: the user reports that setup is complete. Vercel is used **for production only**; development stays local. Since 12 November 2026 (later the same day) the scheduling preview and save work there too; see [Vercel deployment](vercel-deployment.md#scheduling-on-vercel-since-12-november-2026).
 - The old course seed, fresh setup (`schema.sql` still has `required_room_type`) and the ERD will not be updated for the removed room column.
 
 **Known limits**
@@ -552,7 +557,7 @@ Historical discussion; superseded by the implementation record below after the u
   - Leaving with an unsaved complete preview asks the browser for confirmation.
   - Previews are still not stored.
   - Generation can take about two minutes.
-  - On Vercel the scheduling API is blocked (development-only), and the page shows that advice.
+  - On Vercel the scheduling API is blocked (development-only), and the page shows that advice. **Superseded the same day:** the API now works on Vercel (see "Scheduling in production" below).
 - **Verification:**
   - Backend preview/save tests: 82 passed and 2 failed. The 2 failures are the known older preview tests; new tests cover multi-intake joint scheduling, labelled unplaced classes, validation and a multi-intake save.
   - Full backend suite: 347 passed, 10 failed, 1 skipped. These are the same 10 older loader/preview failures as before this work.
@@ -566,3 +571,105 @@ Historical discussion; superseded by the implementation record below after the u
     - 1440 px and 390 px widths.
   - The first walkthrough found that quick successive checkbox clicks were lost (the panel updated from a stale copy). Fixed: the page now owns the selection, and the panel sends toggle/add/clear events.
   - Not checked against hosted Supabase.
+
+## Admin class rescheduling — 12 November 2026
+
+- Work done on branch `feature-admin-room-timetable`.
+- **Requirement:**
+  - Admin > Timetable gets a blue **Reschedule** button beside **Schedule Class**. A class can be selected in the calendar; double-clicking it, or the button, opens a dialog.
+  - The dialog shows the class (with its ID in a drop-down at the top) and its venue, time, type, intake, group and lecturer.
+  - Venue and time can be changed. Venues not available at the chosen time are greyed out, and the backend is asked again whenever the time changes.
+  - A time at which the chosen venue is not free cannot be picked.
+  - Cancel and Save both ask again when something changed: Cancel says changes are lost; Save says the change is published to everyone involved.
+  - The user allowed backend changes and asked for the new API to be documented.
+- **Backend:**
+  - New `backend/app/scheduling/reschedule.py`:
+    - `GET /api/admin/timetable/{id}/availability` and `POST /api/admin/timetable/{id}/reschedule`, registered in `main.py`.
+    - Both use the target week's snapshot, with the class as the only class to place and its own booking removed, through `BookingValidator` and `CandidateGenerator`, so every compulsory rule applies (including the gap and opening hours). Moves into other weeks and classes without a teaching occurrence work.
+    - The save re-checks the move, then calls `admin_reschedule_class` with the admin's token, which does the lock, re-check, `rescheduled` status and audit row in one transaction.
+  - `observability.py` traces the two new paths (by pattern; the class ID is not logged).
+  - Full contract: [admin rescheduling API](admin-reschedule-api.md).
+- **Frontend:**
+  - `RescheduleClassDialog.vue`:
+    - a class drop-down (this week's upcoming active classes) with the class ID;
+    - the class details;
+    - Monday–Friday day buttons with week arrows (past days disabled);
+    - a 15-minute start-time grid: chosen, current and blocked states, click again to clear;
+    - a venue drop-down with greyed-out options and short reasons;
+    - a required reason;
+    - an inline discard or publish confirmation.
+  - `reschedule.js`: pure helpers and their tests.
+  - `RoomTimetable.vue`: click to select (blue outline), double-click or Enter to open, the blue Reschedule button, a success message, and a reload after a move.
+  - `WeekGrid.vue`: the selection and open events.
+  - `scheduleApi.js`: `getAvailability` and `rescheduleClass`. The re-login redirect now returns to the current page.
+- **Design decisions:**
+  - A reason is required, because `admin_reschedule_class` needs one for the change history. **Superseded the same day:** the reason is optional (see the next entry).
+  - Only classes that have not started can be moved, matching the lecturer page.
+  - Choosing a new day clears the time, so a room that is busy at the old time can still be chosen. This avoids being stuck when neither the new time nor the new room is free with the other.
+  - Reschedule is disabled with demo data.
+- **Verification:**
+  - New `test_admin_reschedule.py`: 28 passed. Full backend suite: 375 passed, 10 failed, 1 skipped (the same 10 older loader/preview failures).
+  - `reschedule.test.js` 5/5, `schedulePreview.test.js` 8/8, `roomCalendar.test.js` 7/7; `npm run build` succeeds.
+  - Walkthrough in headless Edge against the real backend on synthetic data, with a fake database function that applies the move (no Supabase). It covered select, double-click, a blocked time not selectable, the next week, room greying, publishing with confirmation (the calendar updated), Cancel with Keep editing / Discard, and 1280 px and 390 px widths.
+  - The first run of the walkthrough failed on a QA-server bug (the fake session did not set the access token, so the save correctly returned 401 and redirected to login). The app needed no change.
+  - Not run against hosted Supabase. The save needs migrations 202611110001 and 202611120003 applied.
+
+## Scheduling in production, optional reschedule reason, lecturer re-check — 12 November 2026
+
+- Work done on branch `feature-admin-room-timetable`, after committing the admin rescheduling work and merging `main` (PRs #18 and #20).
+- **Requirements (user):**
+  - "The generate preview and saving feature seems keep relying on the local environment… The feature now should be migrated to be usable on production environment."
+  - The reschedule reason stays in the dialog but becomes optional; the API accepts a request with or without it.
+  - Check whether the rescheduling feature misses any values.
+  - Only classes that have not started can be moved (confirmed). Choosing a new day clears the time (confirmed as the user's preference).
+  - Validate the teammate's lecturer rescheduling fixes.
+- **Scheduling in production:**
+  - Cause: generate and save shared the test page's local-only guard, and Vercel's forwarded headers always triggered `403 LOCAL_ACCESS_ONLY`. Nothing else depended on the local machine (no server-side preview state).
+  - Change: the API now needs an admin login and a same-site `Origin` (`origin_allowed()` in `preview.py`, also used by the reschedule `POST`). The test page under `/admin/development/` keeps all its local-only checks. The frontend's local-only messages were replaced, and a platform `504` now shows `SERVER_TIMEOUT` advice.
+  - Vercel limits checked: 300 s default duration (Fluid compute) against the 120 s solver limit; about 180 MB of packages against the 250 MB limit. Details, and the save race between instances: [Vercel deployment](vercel-deployment.md#scheduling-on-vercel-since-12-november-2026).
+  - `AGENTS.md` scheduling rule updated: the API is no longer local-only; the test page still is.
+- **Optional reason:** `reason` may be missing, `null` or blank; the API then records `"No reason given"`, because `admin_reschedule_class` requires a non-empty reason. That avoids a new migration. The dialog label now says "optional", and Save no longer waits for a reason.
+- **Values added to the dialog:**
+  - students in the group, from a new `student_count` field in the availability response (the seats a room needs);
+  - the class length, such as "1h 30m";
+  - the current venue's seats;
+  - status: "As scheduled", or "Rescheduled before" (from the new `status` field, which is also on the calendar data).
+  - Considered and not added: the teaching week or occurrence (not meaningful to an admin), the change history (would need a new read), and notifications (no notification system exists; people see changes in their timetables).
+- **Lecturer re-check:** read the merged `lecturer.py` and the lecturer page, and ran the existing tests. Findings 2, 5, 6, 8, 10, 12 and 13 are fixed. Findings 1 and 3 are only partly fixed: the opening time is 08:00 instead of 08:30, and the room table differs from the configured policy. Findings 4, 7 and 9 are open, and the review's intake-code/group-size fix was lost in commit `00e0a83`. Table: [review](lecturer-reschedule-review.md#re-check-after-the-lecturer-page-update-12-november-2026). No lecturer code was changed.
+- **Verification:**
+  - `test_admin_reschedule.py`: 33 passed (new: the optional reason in four forms, the Origin check behind a proxy, and `student_count`/`status`).
+  - `test_schedule_preview.py` and `test_schedule_save.py`: the access tests were rewritten. The API now works in production mode, from a remote client and behind proxy headers; another site's `Origin` is refused before the database; and the test page stays local-only. 86 passed, 2 failed (both among the 10 older failures; they also fail without this change).
+  - Full backend suite: 382 passed, 12 failed, 1 skipped. That is the same 10 older loader/preview failures, plus 2 lecturer tests in `test_auth.py` that fail on `main` after PR #18 (`test_lecturer_timetable_shows_the_real_intake_code_and_group_size`, and `test_admin_can_read_any_record_and_reschedule_on_behalf` with `KeyError: 'course_type'`). Both also fail without this change.
+  - Frontend: `reschedule.test.js` 6/6, `schedulePreview.test.js` 8/8 (new: a platform `504` gives `SERVER_TIMEOUT`), `roomCalendar.test.js` 7/7, `auth.test.js` 7/7, `lecturer.test.js` 30/30; `npm run build` succeeds.
+  - Headless Edge walkthrough on synthetic data, with no reason entered: Save was enabled, the fake database function received `"No reason given"`, and the dialog showed the group size, length, seats and status.
+  - Not verified on the live Vercel site or hosted Supabase.
+
+## Lecturer rescheduling fix — 12 November 2026
+
+- Work done on branch `feature-admin-room-timetable`, after committing the production-scheduling work (`8dce393`).
+- **Requirement (user):** "plan and implement the fix on lecturer. Ensure only fix the 5 area you brief to me": the opening time, the room rules, locking, error text, and the lost real intake code and group size.
+- **Plan:** reuse the scheduling engine for checks (the AGENTS.md rule that every move follows the shared validator), and move the write into a database function, as the admin dialog already does. Keep the lecturer API's URLs and response shapes, so the page needs no API change.
+- **Backend:**
+  - `lecturer.py`: the move and the suggestions use `scheduling/reschedule.py` (`load_roster`, `load_target_snapshot`, `explain`, `start_grid`, `free_room_ids`, `run_move_function`). The hard-coded hours, room table, gap and asyncio lock were removed. Reads use the safe shared client from `student.py`, and all errors go through `safe_database_error`. `group_facts` was restored. The router now receives the full settings (`main.py`).
+  - `scheduling/reschedule.py`: those helpers moved to module level; the admin endpoints use them unchanged. `run_move_function` maps database error codes to fixed messages for both callers.
+  - New migration `202611120004_lecturer_reschedule.sql`: the shared `campus_private.move_class_session`, `admin_reschedule_class` calling it, and the new `lecturer_reschedule_class` with an ownership check. Explained in the [migration guide](hosted-migrations.md); the status query has a new column.
+- **Frontend (lecturer page, opening time only):** `time.js` opens at 08:30, the dialog hint says 08:30, and the demo data uses 08:30 and the configured room table.
+- **Details, before and after:** [fix](lecturer-reschedule-review.md#fix-12-november-2026).
+- **Verification:**
+  - New `test_lecturer_reschedule.py`: 22 passed. It covers:
+    - a move as one function call with the user's token;
+    - the optional reason;
+    - an admin acting for a lecturer;
+    - 08:00, 08:29 and a too-late end refused, and 08:30 accepted;
+    - a weekend;
+    - the lab, auditorium and small rooms;
+    - room, gap, lecturer and student clashes;
+    - another lecturer's class;
+    - safe database errors;
+    - suggestions that start at 08:30, use suitable rooms only and offer nothing at a weekend.
+  - `test_auth.py`: 26 passed. The intake-code/group-size regression test passes again, and the on-behalf test now checks that no direct writes are made.
+  - `test_admin_reschedule.py`: 33 passed after the refactor.
+  - PGlite: the new `lecturer-reschedule.test.cjs` passed 14 checks: owner only, history by the lecturer, stale and clash refusals, the admin path, and the internal routine not being callable. `admin-reschedule-fixes.test.cjs` (24) and `admin_timetable.test.cjs` still pass. The status query reported correctly before and after 003 and 004.
+  - Frontend: `lecturer.test.js` 30/30, after updating three tests that encoded 08:00 and "labs only a lab".
+  - Full backend suite: 406 passed, 10 failed, 1 skipped. Only the 10 older loader/preview failures remain; the two lecturer failures from `main` are fixed. Other PGlite suites still pass (`rescheduled-status` 33, `save-audit` 46). Frontend unit tests all pass and `npm run build` succeeds.
+  - Not run against hosted Supabase or on Vercel; the lecturer page was not opened in a browser.

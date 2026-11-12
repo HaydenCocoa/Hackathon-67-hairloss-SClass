@@ -47,7 +47,8 @@ test('outcomes are explained in plain language', () => {
 
 test('error advice, and which errors keep the preview', () => {
   assert.match(errorAdvice('PREVIEW_STALE'), /Regenerate/)
-  assert.match(errorAdvice('LOCAL_ACCESS_ONLY'), /local development server/)
+  assert.match(errorAdvice('ORIGIN_NOT_ALLOWED'), /own address/)
+  assert.equal(errorAdvice('LOCAL_ACCESS_ONLY'), '')  // the API is no longer local-only
   assert.equal(errorAdvice('SOMETHING_NEW'), '')
   assert.ok(keepsPreview('GENERATION_BUSY') && keepsPreview('NETWORK'))
   assert.ok(!keepsPreview('PREVIEW_STALE') && !keepsPreview('SAVE_OUTCOME_UNKNOWN'))
@@ -80,7 +81,7 @@ test('rows are sorted, labelled in campus time, filtered and grouped by day', ()
 })
 
 // ---------- scheduleApi.js against a fake fetch ----------
-globalThis.window = { location: { assign(url) { window.location.assigned = url } } }
+globalThis.window = { location: { pathname: '/admin/schedule', assign(url) { window.location.assigned = url } } }
 const { ScheduleApiError, generatePreview, listIntakes, savePreview } = await import('./scheduleApi.js')
 
 function fakeFetch(status, body, headers = {}) {
@@ -116,6 +117,8 @@ test('scheduling errors keep their code and request ID; admin API string errors 
   await assert.rejects(generatePreview('2026-11-16', []), /Give either intake_id or intake_ids/)
   fakeFetch(502, undefined)
   await assert.rejects(listIntakes(), /The request failed \(HTTP 502\)/)
+  fakeFetch(504, undefined)  // Vercel's own timeout page
+  await assert.rejects(generatePreview('2026-11-16', ['I1']), (e) => e.code === 'SERVER_TIMEOUT' && e.status === 504)
   fakeFetch(200, undefined)
   await assert.rejects(listIntakes(), /unreadable reply \(HTTP 200\)/)
   globalThis.fetch = async () => { throw new TypeError('offline') }

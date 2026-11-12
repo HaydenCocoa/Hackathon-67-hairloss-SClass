@@ -1,6 +1,6 @@
 # Step 9: generation preview API and test page
 
-Implemented and verified locally: 10 November 2026. **Read-only; direct localhost access in development only.**
+Implemented and verified locally: 10 November 2026. **Read-only.** Since 12 November 2026 the API is an admin-only **production** endpoint that also works on Vercel (see "Access and test page" below); only the test page stays local-development only.
 
 The user postponed step 8 (timetable quality optimization), requested implementation plus a simple service-hosted page, then confirmed selected-intake/group generation and local development with authentication deferred. This supersedes the initial whole-week default. This implementation builds on the [weekly snapshot loader](scheduling-data-loader.md) and [CP-SAT feasibility solver](cp-sat-scheduling.md). Track decisions and completion in [the backend record](agents.md).
 
@@ -86,9 +86,11 @@ The draft is returned directly without a database preview table, cache, or retri
 
 **Update, 11 November 2026 (step 10):** saving is implemented as `POST /api/schedules/save`; see [timetable saving](timetable-saving.md). The user chose no stored draft: the page sends back the preview it shows, and the server trusts only each placement's occurrence, room and start. It re-reads the week, requires the same scope-bound revision, revalidates every class and their mutual clashes, then writes all rows in one insert. Leaving the page still discards an unsaved preview. Full database-transactional revalidation (a database function) was deliberately deferred; the remaining race with writers outside this backend is recorded there.
 
-## Local access and test page
+## Access and test page
 
-The API, page and its JS/CSS require `app.environment` exactly `development`, a loopback client peer and localhost/loopback Host, an approved Origin if supplied, and no `Forwarded` or relevant `X-Forwarded-*` headers. Same-origin requests and configured CORS origins are accepted. This rejects remote/reverse-proxy access; do not remove these checks to publish an unauthenticated campus-wide endpoint. Administrator authentication remains future work. CORS permits POST for configured origins but does not authorize access.
+**Since 12 November 2026 (user's request: scheduling must work in production):** `POST /api/schedules/generate` and `POST /api/schedules/save` need only an **admin login** and, when the browser sends an `Origin`, the same site (the `Host` / `X-Forwarded-Host` the browser used) or a configured CORS origin; otherwise `403 ORIGIN_NOT_ALLOWED`. The development-mode, loopback and no-proxy-header rules below now apply **only to the test page and its JS/CSS** under `/admin/development/`. Reasons and Vercel limits: [Vercel deployment](vercel-deployment.md#scheduling-on-vercel-since-12-november-2026).
+
+Before 12 November 2026, the API, page and its JS/CSS required `app.environment` exactly `development`, a loopback client peer and localhost/loopback Host, an approved Origin if supplied, and no `Forwarded` or relevant `X-Forwarded-*` headers. Same-origin requests and configured CORS origins are accepted. This rejects remote/reverse-proxy access; do not remove these checks to publish an unauthenticated campus-wide endpoint. Administrator authentication remains future work. CORS permits POST for configured origins but does not authorize access.
 
 Start the existing FastAPI service from the repository root:
 

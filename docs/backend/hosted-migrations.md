@@ -4,7 +4,7 @@ Written 12 November 2026, before the user runs these on the hosted project. **No
 
 ## 1. Check what is already applied
 
-Run [hosted-migrations-status.sql](hosted-migrations-status.sql) in the SQL Editor. It is read-only and returns one row with `true` (already applied) or `false` for each migration below. It was checked locally on a database before and after all five migrations.
+Run [hosted-migrations-status.sql](hosted-migrations-status.sql) in the SQL Editor. It is read-only and returns one row with `true` (already applied) or `false` for each migration below. It was checked locally on a database before and after all six migrations.
 
 `202611100001 teaching requirements` must be `true`. The `rescheduled` and save-audit migrations stop if it is missing, and the admin reschedule fixes need the `rescheduled` migration first.
 
@@ -19,6 +19,7 @@ Run each file **once**, as a whole, in the SQL Editor (as `postgres`). Skip any 
 | 3 | `202611120001_class_session_rescheduled_status.sql` | Yes | No |
 | 4 | `202611120002_save_audit.sql` | Yes | No |
 | 5 | `202611120003_admin_reschedule_fixes.sql` | Yes | No |
+| 6 | `202611120004_lecturer_reschedule.sql` (added 12 November 2026, after the lecturer fix) | Yes | No |
 
 Run 2 and 5 in the same session. Between them, the admin page's **Reschedule** fails with a database error, because the old function still reads the deleted column.
 
@@ -60,8 +61,18 @@ Run 2 and 5 in the same session. Between them, the admin page's **Reschedule** f
 - It still does **not** check opening hours or the 15-minute gap ([step 11 review](lecturer-reschedule-review.md)).
 - If the room mapping in `Config/config.json` changes, change this function too.
 
+### `202611120004_lecturer_reschedule.sql`: lecturer moves in one transaction
+- **Why:** the lecturer page used to move a class with two separate writes (the class, then its history row) and a lock that only worked inside one backend process. Two Vercel instances, a timetable save or an admin move could double-book, and a failed history write could leave a move unrecorded ([review, finding 4](lecturer-reschedule-review.md#fix-12-november-2026)).
+- **What it adds:**
+  - `campus_private.move_class_session`: the move that `admin_reschedule_class` already did, unchanged. It takes the timetable lock, checks that the class has not changed, checks the room's type, size and the auditorium rule, re-checks clashes, marks the class `rescheduled` and writes the history row, all in one transaction. Users cannot call it directly.
+  - `admin_reschedule_class` keeps its name, inputs and admin check, and now calls that shared routine.
+  - New `lecturer_reschedule_class`: the same move, allowed only for the lecturer who teaches the class (`lecturers.auth_user_id`). The history row records that lecturer.
+- **Needs** 202611120003 first; it stops with a message otherwise. It changes no rows and can be run again.
+- **Until it is applied**, a lecturer's Reschedule answers "The database is missing the rescheduling migrations (202611120003, 202611120004). Nothing was changed." Admin moves keep working.
+- Like the admin function, it does **not** check opening hours or the 15-minute gap; the backend checks those with the scheduling engine just before calling it.
+
 ## 4. After running
 
 - Run the status query again: every column should be `true`.
 - Try one admin reschedule and one lecturer reschedule on a sample class.
-- Saving a generated timetable needs the local backend (see [Vercel deployment](vercel-deployment.md): previews and saves are local-development only).
+- Saving a generated timetable works on the local backend and, since 12 November 2026, on Vercel (see [Vercel deployment](vercel-deployment.md#scheduling-on-vercel-since-12-november-2026)). It needs `202611120002_save_audit`.

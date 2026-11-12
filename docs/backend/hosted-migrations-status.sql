@@ -18,6 +18,11 @@ select
   exists (select 1 from information_schema.columns
           where table_schema = 'public' and table_name = 'class_sessions' and column_name = 'created_by')
     as "202611120002 save audit",
+  -- 202611120004 moves this function's body into campus_private.move_class_session, so look in both.
   exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-          where n.nspname = 'public' and p.proname = 'admin_reschedule_class' and p.prosrc like '%course_kind%')
-    as "202611120003 admin reschedule fixes";
+          where ((n.nspname = 'public' and p.proname = 'admin_reschedule_class')
+                 or (n.nspname = 'campus_private' and p.proname = 'move_class_session'))
+            and p.prosrc like '%course_kind%')
+    as "202611120003 admin reschedule fixes",
+  to_regprocedure('public.lecturer_reschedule_class(uuid, timestamptz, uuid, timestamptz, uuid, text)') is not null
+    as "202611120004 lecturer reschedule";

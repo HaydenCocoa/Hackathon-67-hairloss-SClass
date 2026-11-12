@@ -1,7 +1,10 @@
-"""Development-only HTTP orchestration for weekly scheduling.
+"""HTTP orchestration for weekly scheduling.
 
 `generate` is read-only. `save` (step 10) writes the reviewed preview to
-class_sessions after rechecking it against fresh data."""
+class_sessions after rechecking it against fresh data. Both are admin-only
+production endpoints (used by /admin/schedule, locally and on Vercel) since
+12 November 2026. Only the development test page under /admin/development/
+still requires development mode and a direct localhost connection."""
 
 import hashlib
 import json
@@ -12,6 +15,7 @@ from datetime import date, timedelta
 from ipaddress import ip_address
 from pathlib import Path
 from typing import Iterable, Literal
+from urllib.parse import urlsplit
 from uuid import UUID
 
 import anyio
@@ -28,7 +32,7 @@ from .save import MAX_PLACEMENTS, SavedClass, SavePlacement, SaveRejected, SaveR
 from .solver import ClassPlacement, ScheduleResult, solve_weekly_schedule
 
 ASSETS = Path(__file__).resolve().parent / "development"
-# Admin-only development page (also requires development mode and localhost).
+# Admin-only development test page (also requires development mode and a direct localhost connection).
 PAGE_PATH = "/admin/development/scheduling-test-hayden"
 # Upper bound on intakes scheduled together in one preview (the model grows with every class).
 MAX_INTAKES = 100
@@ -167,6 +171,25 @@ def _loopback(value: str) -> bool:
         return False
 
 
+def origin_allowed(request: Request, cors_origins: Iterable[str]) -> bool:
+    """Production guard for admin writes (works behind Vercel's proxy, so no localhost rule).
+
+    Browsers always send Origin on a cross-origin POST; it must be this site (the host the
+    browser used, which Vercel passes as Host / X-Forwarded-Host) or a configured CORS
+    origin. A request without Origin (same-origin tools, tests) is allowed here and still
+    needs the admin session cookie, which is SameSite=Lax."""
+    origin = request.headers.get("origin")
+    if origin is None or origin in cors_origins:
+        return True
+    hosts = {request.headers.get("host", "").lower()}
+    hosts.update(item.strip().lower() for item in request.headers.get("x-forwarded-host", "").split(","))
+    try:
+        netloc = urlsplit(origin).netloc.lower()
+    except ValueError:
+        return False
+    return bool(netloc) and netloc in hosts
+
+
 def create_preview_router(settings: Settings) -> APIRouter:
     # One slot covers loading, solving, verification and response construction.
     # Per process; this is deliberately not a distributed job system.
@@ -185,7 +208,11 @@ def create_preview_router(settings: Settings) -> APIRouter:
         if origin is not None and origin not in allowed:
             raise failure(403, "ORIGIN_NOT_ALLOWED", "This browser origin cannot use scheduling development tools.")
 
-    # Runs after development_access, so outside development the tools stay 404.
+    async def same_site(request: Request):
+        if not origin_allowed(request, settings.server.cors_origins):
+            raise failure(403, "ORIGIN_NOT_ALLOWED", "This browser origin cannot use the scheduling tools.",
+                          "access_rejected")
+
     async def admin_access(session: SessionUser | None = Depends(get_session)) -> SessionUser:
         if session is None:
             raise failure(401, "AUTH_REQUIRED", "Log in as an administrator to use the scheduling tools.", "access_rejected")
@@ -193,13 +220,16 @@ def create_preview_router(settings: Settings) -> APIRouter:
             raise failure(403, "ADMIN_REQUIRED", "Only administrators can use the scheduling tools.", "access_rejected")
         return session
 
-    router = APIRouter(dependencies=[Depends(development_access)], tags=["Scheduling development"])
-    admin_only = [Depends(admin_access)]
+    router = APIRouter(tags=["Scheduling"])
+    # The origin check runs first, so a rejected origin never reaches the session lookup.
+    admin_only = [Depends(same_site), Depends(admin_access)]
+    # Development test page: development mode, direct localhost, then admin.
+    development_only = [Depends(development_access)]
 
     @router.post(
         "/api/schedules/generate", response_model=SchedulePreview, dependencies=admin_only,
         responses={code: {"model": PreviewError} for code in (401, 403, 404, 429, 500, 502, 503, 504)},
-        summary="Generate a read-only weekly schedule preview (local development)",
+        summary="Generate a read-only weekly schedule preview (admin)",
         description="Schedules pending occurrences for one intake (intake_id, optionally one group) or for several "
                     "intakes together (intake_ids). All existing bookings remain fixed. "
                     "Compulsory rules (opening hours, whole-minute starts, room policy, capacity, no clashes, the configured gap "
@@ -271,7 +301,7 @@ def create_preview_router(settings: Settings) -> APIRouter:
     @router.post(
         "/api/schedules/save", status_code=201, response_model=SaveResult, dependencies=admin_only,
         responses={code: {"model": PreviewError} for code in (401, 403, 404, 409, 429, 500, 502, 503, 504)},
-        summary="Save a reviewed preview as real class bookings (local development, admin use)",
+        summary="Save a reviewed preview as real class bookings (admin)",
         description="Re-reads the week, rejects the save if anything changed since the preview, revalidates every class, "
                     "then inserts all classes into class_sessions in one statement (all or nothing). Each class records "
                     "the saving admin (created_by), and the database adds a schedule_changes 'create' audit row in the "
@@ -348,7 +378,7 @@ def create_preview_router(settings: Settings) -> APIRouter:
             finally:
                 slots.release()
 
-    @router.get(PAGE_PATH, include_in_schema=False)
+    @router.get(PAGE_PATH, include_in_schema=False, dependencies=development_only)
     async def page(session: SessionUser | None = Depends(get_session)):
         no_store = {"Cache-Control": "no-store"}
         if session is None:
@@ -359,11 +389,11 @@ def create_preview_router(settings: Settings) -> APIRouter:
         return HTMLResponse(html, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
                                            "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"})
 
-    @router.get(PAGE_PATH + "/app.js", include_in_schema=False, dependencies=admin_only)
+    @router.get(PAGE_PATH + "/app.js", include_in_schema=False, dependencies=[*development_only, Depends(admin_access)])
     async def script():
         return FileResponse(ASSETS / "app.js", media_type="text/javascript", headers={"Cache-Control": "no-store"})
 
-    @router.get(PAGE_PATH + "/style.css", include_in_schema=False, dependencies=admin_only)
+    @router.get(PAGE_PATH + "/style.css", include_in_schema=False, dependencies=[*development_only, Depends(admin_access)])
     async def stylesheet():
         return FileResponse(ASSETS / "style.css", media_type="text/css", headers={"Cache-Control": "no-store"})
 

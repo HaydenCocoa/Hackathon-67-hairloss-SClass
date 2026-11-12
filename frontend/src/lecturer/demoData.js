@@ -34,8 +34,9 @@ const COURSES = {
 }
 
 // Which room types a course type may use (the backend decides the same way).
-const ROOM_TYPES = { lecture: ['classroom', 'auditorium'], tutorial: ['classroom'], lab: ['lab'] }
-const roomTypesOf = (s) => ROOM_TYPES[s.course.type] ?? ['classroom', 'auditorium']
+// scheduling.room_compatibility in Config/config.json ('others' and unknown types: no rooms).
+const ROOM_TYPES = { lecture: ['classroom', 'auditorium'], tutorial: ['classroom', 'lab'], lab: ['classroom', 'lab'] }
+const roomTypesOf = (s) => ROOM_TYPES[s.course.type] ?? []
 
 // Intake I1 has two groups (so the group is shown); I2 has one (so it is hidden).
 const INTAKES = { I1: { maxGroup: 2 }, I2: { maxGroup: 1 } }
@@ -56,9 +57,9 @@ const WEEKLY = [
   [3, '14:00', 'SE220-tutorial', 2, 'I1', 1, 'demo-room-4'],
 ]
 
-// Same rules as the backend (supabase/reschedule_rules.sql): Monday to Friday, 08:00 to 18:00,
+// Same rules as the backend (Config/config.json): Monday to Friday, 08:30 to 18:00,
 // and at least 15 minutes between classes of the same room, lecturer or students.
-const DAY_START = 8 * 60 // suggestions are offered every 30 minutes
+const DAY_START = 8 * 60 + 30 // suggestions are offered every 30 minutes
 const DAY_END = 18 * 60
 const STEP = 30
 const GAP = 15
@@ -226,7 +227,7 @@ export function createDemoApi(now = () => new Date()) {
       if (isWeekend(session_date)) throw new ApiError('Classes run Monday to Friday only.')
       const endMin = toMin(start_time) + s.course.minutes
       if (toMin(start_time) < DAY_START || endMin > DAY_END) {
-        throw new ApiError('Classes must start at 08:00 or later and finish by 18:00.')
+        throw new ApiError('Classes must start at 08:30 or later and finish by 18:00.')
       }
       const target = room(room_id)
       if (!target) throw new ApiError('That room is not available.')

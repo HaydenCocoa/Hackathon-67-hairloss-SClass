@@ -322,14 +322,14 @@ def test_admin_can_read_any_record_and_reschedule_on_behalf(supabase, frontend):
         assert len(c.get("/api/lecturers").json()) == 3
         assert c.get("/api/student/TP000001").status_code == 200
         move = {"session_date": "2026-11-20", "start_time": "10:00", "room_id": uid(9)}
-        assert c.patch(f"/api/lecturers/{uid(202)}/sessions/{uid(401)}", json=move).status_code == 200
         # A cancelled class cannot be moved (that would silently reactivate it).
         assert c.patch(f"/api/lecturers/{uid(202)}/sessions/{uid(402)}", json=move).status_code == 409
-    patches = [call for call in state["calls"] if call["method"] == "PATCH"]
-    assert len(patches) == 1 and patches[0]["body"]["status"] == "rescheduled"
-    # The move is logged as made by the admin's Supabase user.
-    logs = [call["body"] for call in state["calls"] if call["path"] == "/rest/v1/schedule_changes"]
-    assert len(logs) == 1 and logs[0]["action"] == "reschedule" and logs[0]["changed_by"] == uid(1)
+    # Since 12 November 2026 a move is one database function call (admin_reschedule_class for an admin,
+    # recording the admin as changed_by); the successful on-behalf move is tested in
+    # test_lecturer_reschedule.py with data the scheduling engine can check. Never direct writes:
+    assert not any(call["method"] == "PATCH" for call in state["calls"])
+    assert not any(call["path"] in ("/rest/v1/schedule_changes", "/rest/v1/class_sessions")
+                   for call in state["calls"] if call["method"] == "POST")
 
 
 def test_lecturer_timetable_shows_the_real_intake_code_and_group_size(supabase, frontend, monkeypatch):

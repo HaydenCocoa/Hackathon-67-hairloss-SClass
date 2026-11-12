@@ -230,24 +230,28 @@ def test_save_and_generation_share_one_slot(provider, monkeypatch):
         assert client.post(SAVE, json=body).status_code == 201
 
 
-@pytest.mark.parametrize("case", ["production", "remote", "origin", "forwarded"])
-def test_save_access_rules_match_preview(provider, case):
+@pytest.mark.parametrize("case", ["production", "remote", "forwarded", "origin"])
+def test_save_works_in_production_and_refuses_other_sites(provider, case):
+    """Since 12 November 2026 saving is a production endpoint (Vercel): admin login and this site only."""
     settings, state = provider
     with client_for(settings) as client:
         body = save_body(generate(client))
     state["calls"].clear()
-    peer, headers = ("127.0.0.1", 51000), {}
-    if case == "production":
-        settings.app.environment = "production"
-    elif case == "remote":
-        peer = ("192.0.2.10", 51000)
+    settings.app.environment = "production"
+    peer, headers = ("192.0.2.10", 51000), {}
+    if case == "forwarded":
+        headers = {"X-Forwarded-For": "198.51.100.7", "X-Forwarded-Host": "sclass.example",
+                   "Origin": "https://sclass.example"}
     elif case == "origin":
         headers = {"Origin": "https://attacker.example"}
-    else:
-        headers = {"X-Forwarded-For": "127.0.0.1"}
     with TestClient(as_admin(create_app(settings)), base_url=BASE, client=peer, headers=headers) as client:
-        assert client.post(SAVE, json=body).status_code == (404 if case == "production" else 403)
-    assert not state["calls"] and not state["writes"]
+        response = client.post(SAVE, json=body)
+    if case == "origin":
+        assert response.status_code == 403 and detail(response)["code"] == "ORIGIN_NOT_ALLOWED"
+        assert not state["calls"] and not state["writes"]
+    else:
+        assert response.status_code == 201, response.text
+        assert state["writes"]
 
 
 def test_save_is_traced_without_private_values_and_documented(provider, traces):  # noqa: F811

@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
@@ -19,6 +20,12 @@ _SETUP_LOCK = Lock()
 _FIELDS = {"http_status", "provider_status", "provider_code", "rpc", "stage", "duration_ms", "code",
            "pending_count", "placement_count", "row_count", "status", "exception_type", "frames", "saved_count"}
 TRACED_PATHS = {"/api/schedules/generate", "/api/schedules/save"}
+# Admin rescheduling (scheduling/reschedule.py). The class id in the path is never logged.
+TRACED_PATTERN = re.compile(r"^/api/admin/timetable/[0-9a-fA-F-]{36}/(availability|reschedule)$")
+
+
+def traced(path: str | None) -> bool:
+    return path in TRACED_PATHS or bool(path and TRACED_PATTERN.match(path))
 
 
 class TraceFormatter(logging.Formatter):
@@ -69,7 +76,7 @@ class SchedulingTraceMiddleware:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or scope.get("path") not in TRACED_PATHS:
+        if scope["type"] != "http" or not traced(scope.get("path")):
             return await self.app(scope, receive, send)
         # Generate locally rather than accepting a caller-supplied log value.
         token = REQUEST_ID.set(uuid4().hex)

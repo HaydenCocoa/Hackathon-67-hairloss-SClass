@@ -1,6 +1,6 @@
 # Step 10: saving a generated timetable
 
-Implemented and verified locally: 11 November 2026. **Local development, admin use only. Not run against hosted Supabase.**
+Implemented and verified locally: 11 November 2026. **Admin use only. Not run against hosted Supabase.** Since 12 November 2026 saving is a production endpoint (admin login and same-site `Origin`), usable on Vercel; see [preview access](schedule-preview-api.md#access-and-test-page).
 
 Related: [preview API record](schedule-preview-api.md), [backend record](agents.md), [logging](scheduling-logging.md).
 
@@ -9,9 +9,9 @@ Related: [preview API record](schedule-preview-api.md), [backend record](agents.
 | # | Topic | Decision |
 | --- | --- | --- |
 | — | Drafts | **No stored draft.** The preview exists only on the page. Leaving or reloading loses it, and the admin generates again. Saving writes real bookings immediately; there is no draft, approval or publish state. Reason: hackathon scope, ship quickly. |
-| D1 | Who saves | Admin only. With no login yet, "admin only" is enforced the same way as the preview: `app.environment=development`, a direct localhost connection, an allowed Origin and no proxy headers. Login-based admin checks come with the login page. |
+| D1 | Who saves | Admin only. With no login yet, "admin only" is enforced the same way as the preview: `app.environment=development`, a direct localhost connection, an allowed Origin and no proxy headers. Login-based admin checks come with the login page. **Superseded 12 November 2026:** an admin login (and a same-site `Origin`) is now the only requirement, so saving works on Vercel. |
 | D2 | Stale preview | Reject the save if anything in the week changed since the preview, and regenerate. |
-| D3 | Concurrency | The backend rechecks, then writes with one insert. Safe against other saves through this backend process; **not** against writes from elsewhere (Supabase dashboard, another server process, the lecturer reschedule endpoint) during the short gap between the re-read and the insert. A database function would be fully safe; deferred. |
+| D3 | Concurrency | The backend rechecks, then writes with one insert. Safe against other saves through this backend process; **not** against writes from elsewhere (Supabase dashboard, another server process, the lecturer reschedule endpoint) during the short gap between the re-read and the insert. A database function would be fully safe; deferred. Since 12 November 2026 saves can also run in separate Vercel instances, which this backend's one-at-a-time slot does not cover ([details](vercel-deployment.md#scheduling-on-vercel-since-12-november-2026)). |
 | D4 | Audit of who saved | Deferred until login existed. **Implemented 12 November 2026:** each saved class records the admin (`created_by`) and a database trigger adds a `schedule_changes` `create` row in the same insert. See [save audit](save-audit.md). |
 | D5 | Whole or partial | Whole preview only. |
 | D6 | Viewing saved timetables | Out of scope for step 10. |

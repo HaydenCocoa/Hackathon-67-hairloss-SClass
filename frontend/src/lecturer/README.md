@@ -13,17 +13,19 @@ Vue 3 (`<script setup>`). Opened at **`#/lecturer`** (`src/App.vue`). Everything
 | `session.js`, `time.js` | Small helpers (colours, labels, Kuala Lumpur dates and times). |
 | `lecturer.test.js` | `node --test frontend/src/lecturer/lecturer.test.js` |
 
-## Rules (enforced by the database function `lecturer_reschedule_class`, see `supabase/reschedule_rules.sql`)
+## Rules (since 12 November 2026: the scheduling engine plus the database function `lecturer_reschedule_class`)
 
-- Monday to Friday, 08:00 to 18:00 (Malaysia time); a class must finish by 18:00.
-- At least 15 minutes between classes of the same room, the same lecturer and the same students.
-- Room type follows the course type: lecture → classroom or auditorium, tutorial → classroom, lab → lab.
+The backend checks a move with the same rules as generated timetables (`backend/app/scheduling/reschedule.py`), read from `Config/config.json`:
+- Opening hours: Monday to Friday, 08:30 to 18:00 (Malaysia time), and closed dates; a class must finish by closing time.
+- At least 15 minutes between classes or meetings of the same room, the same lecturer and the same students.
+- Room type follows `scheduling.room_compatibility`: lecture → classroom or auditorium; tutorial and lab → classroom or lab. An auditorium only when no other permitted room seats the group.
 - The room must be active and seat the whole group.
-- A moved class gets status `rescheduled` and a row in `schedule_changes`, in the same transaction.
+
+The move is then written by `public.lecturer_reschedule_class` (migration `supabase/migrations/202611120004_lecturer_reschedule.sql`). In one transaction under the timetable lock, it checks that the class is the lecturer's, re-checks clashes, gives the class the status `rescheduled` and writes a `schedule_changes` row.
 
 The recommendations come from `GET /api/lecturers/{id}/sessions/{id}/suggestions`; the backend only offers times that follow these rules.
-The page never writes a clash: the final move is checked again by the database.
-=======
+See the [fix notes](../../../docs/backend/lecturer-reschedule-review.md#fix-12-november-2026).
+
 Vue 3 (`<script setup>` single-file components). Log in as a lecturer at **`/login`**; lecturers are sent to **`/lecturer`** (old `#/lecturer` links redirect there).
 Every file the Lecturer page needs on the frontend is in this folder, like `student/`.
 
@@ -41,6 +43,6 @@ Every file the Lecturer page needs on the frontend is in this folder, like `stud
 
 ## Notes
 - Login is required. The backend only lets a lecturer read and move their own classes (admins may act for any lecturer); the dropdown lists just the logged-in lecturer.
-- The server decides whether a new time is allowed. Today it checks room, lecturer and student clashes (classes and meetings), room capacity and that the room is active. It does **not** yet check opening hours, the 15-minute gap, the room type or the auditorium rule; see the [step 11 review](../../../docs/backend/lecturer-reschedule-review.md).
+- The server decides whether a new time is allowed, with the rules above (since 12 November 2026; see the [step 11 review](../../../docs/backend/lecturer-reschedule-review.md)).
 - A moved class gets the status `rescheduled` and a `schedule_changes` row.
-- Backend: `backend/app/lecturer.py`. There are no lecturer database functions; the admin page's reschedule uses `public.admin_reschedule_class` instead.
+- Backend: `backend/app/lecturer.py`. Database functions: `public.lecturer_reschedule_class` for lecturers, `public.admin_reschedule_class` when an admin acts for a lecturer.
