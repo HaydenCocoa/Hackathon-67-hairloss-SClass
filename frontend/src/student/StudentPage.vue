@@ -1,73 +1,52 @@
 <script setup>
 // Student Page (Bi Jin): weekly timetable with cancellations and reschedules.
-// Open at /#/student. Until login is ready, the student enters their code (or uses demo data).
-// When Hayden's login is done, pass the signed-in student's code: <StudentPage :student-code="..." />
+// Shown at /student for the logged-in student; App.vue passes their code as :student-code.
 import { computed, ref, watch } from 'vue'
 import './student.css'
 import AgendaList from './AgendaList.vue'
 import SessionDialog from './SessionDialog.vue'
 import WeekTimetable from './WeekTimetable.vue'
-import { DEMO_CODE, makeDemoTimetable } from './demoData'
 import { fetchTimetable } from './studentApi'
 import { addDays, fmtDateTime, fmtTime, fmtWeekRange, fromDateInput, startOfWeek, timeAgo, toDateInput } from './time'
 
 const props = defineProps({ studentCode: { type: String, default: '' } })
 
-const STORAGE_KEY = 'sclass.studentCode'
-const storage = {
-  get(key) { try { return localStorage.getItem(key) } catch { return null } },
-  set(key, value) { try { value ? localStorage.setItem(key, value) : localStorage.removeItem(key) } catch { /* private mode */ } },
-}
-
-const code = ref(props.studentCode || storage.get(STORAGE_KEY) || '')
-const codeInput = ref('')
 const weekStart = ref(startOfWeek(new Date()))
 const view = ref(window.innerWidth < 760 ? 'list' : 'week')
 const data = ref(null)
 const loading = ref(false)
 const error = ref(null) // { message, backendDown }
 const selected = ref(null)
-const isDemo = computed(() => code.value === DEMO_CODE)
+const hasCode = computed(() => Boolean(props.studentCode))
 let requestId = 0
 
 async function load() {
-  if (!code.value) return
   const id = ++requestId
   const start = weekStart.value
-  loading.value = true
   error.value = null
-  if (isDemo.value) {
-    data.value = makeDemoTimetable(start)
+  if (!hasCode.value) {
+    data.value = null
     loading.value = false
     return
   }
+  loading.value = true
   try {
-    const result = await fetchTimetable(code.value, start, addDays(start, 7))
+    const result = await fetchTimetable(props.studentCode, start, addDays(start, 7))
     if (id === requestId) data.value = result
   } catch (e) {
     if (id !== requestId) return
+    if (e.status === 401) {
+      // Login expired: go back to the login page and return here afterwards.
+      window.location.assign(`/login?next=${encodeURIComponent('/student')}`)
+      return
+    }
     error.value = { message: e.message, backendDown: Boolean(e.backendUnavailable) }
     if (!e.backendUnavailable) data.value = null
   } finally {
     if (id === requestId) loading.value = false
   }
 }
-watch([code, weekStart], load, { immediate: true })
-watch(() => props.studentCode, (value) => { if (value) code.value = value })
-
-function signIn(value) {
-  const clean = value.trim().toUpperCase()
-  if (!clean) return
-  data.value = null
-  code.value = clean
-  storage.set(STORAGE_KEY, clean)
-}
-function switchStudent() {
-  code.value = ''
-  data.value = null
-  error.value = null
-  storage.set(STORAGE_KEY, '')
-}
+watch([() => props.studentCode, weekStart], load, { immediate: true })
 
 // Week navigation
 const shiftWeek = (n) => { weekStart.value = addDays(weekStart.value, 7 * n) }
@@ -157,8 +136,6 @@ function openChange(change) {
 }
 
 const firstName = computed(() => (data.value?.student.full_name || '').split(' ')[0])
-const initials = computed(() => (data.value?.student.full_name || code.value || '?')
-  .split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase())
 const greeting = computed(() => {
   const h = new Date().getHours()
   return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'
@@ -167,54 +144,17 @@ const greeting = computed(() => {
 
 <template>
   <div class="sp">
-    <!-- Top app bar -->
-    <header class="topbar">
-      <a class="brand" href="#/" title="Back to main menu">
-        <span class="logo" aria-hidden="true"><i class="b"></i><i class="r"></i><i class="y"></i><i class="g"></i></span>
-        <span class="brand-name">SClass</span>
-        <span class="brand-sub">Student</span>
-      </a>
-      <div v-if="code" class="account">
-        <span v-if="isDemo" class="sp-badge moved">Demo</span>
-        <span class="who">
-          <strong>{{ data?.student.full_name || code }}</strong>
-          <small>{{ data?.student.student_code || code }}</small>
-        </span>
-        <span class="avatar" aria-hidden="true">{{ initials }}</span>
-        <button class="sp-btn text" type="button" @click="switchStudent">Switch</button>
-      </div>
-    </header>
-
-    <!-- Temporary sign-in until the Login Page is connected -->
-    <div v-if="!code" class="signin-wrap">
-      <form class="signin" @submit.prevent="signIn(codeInput)">
-        <span class="logo big" aria-hidden="true"><i class="b"></i><i class="r"></i><i class="y"></i><i class="g"></i></span>
-        <h1>View your timetable</h1>
-        <p>Enter your student code to see your classes, cancellations and reschedules.</p>
-        <label class="field">
-          <span>Student code</span>
-          <input v-model="codeInput" placeholder="e.g. TP000001" autocomplete="off" autofocus />
-        </label>
-        <button class="sp-btn primary full" type="submit" :disabled="!codeInput.trim()">View timetable</button>
-        <button class="sp-btn text full" type="button" @click="signIn(DEMO_CODE)">Try with sample data</button>
-      </form>
-    </div>
-
-    <div v-else class="page">
+    <div class="page">
       <!-- Problem banners -->
+      <div v-if="!hasCode" class="banner bad" role="alert">
+        <span>Your account is not linked to a student record yet, so there is no timetable to show. Please ask the admin to link your account.</span>
+      </div>
       <div v-if="error" :class="['banner', error.backendDown ? 'warn' : 'bad']" role="alert">
         <span>{{ error.message }}</span>
         <span class="banner-actions">
           <button class="sp-btn text" type="button" @click="load">Retry</button>
-          <button v-if="error.backendDown" class="sp-btn" type="button" @click="signIn(DEMO_CODE)">Use sample data</button>
-          <button v-else class="sp-btn" type="button" @click="switchStudent">Change student</button>
         </span>
       </div>
-      <div v-if="isDemo" class="banner info">
-        <span>You are viewing <strong>sample data</strong>. Enter a real student code once the backend and classes are ready.</span>
-        <button class="sp-btn text" type="button" @click="switchStudent">Use a student code</button>
-      </div>
-
       <!-- Greeting + summary -->
       <section v-if="data" class="hero">
         <div>
@@ -302,48 +242,6 @@ const greeting = computed(() => {
 </template>
 
 <style scoped>
-/* Top bar */
-.topbar {
-  position: sticky; top: 0; z-index: 10;
-  display: flex; align-items: center; justify-content: space-between; gap: 16px;
-  height: 64px; padding: 0 24px; background: #fff; border-bottom: 1px solid var(--grey-300);
-}
-.brand { display: flex; align-items: center; gap: 10px; color: var(--grey-900); text-decoration: none; }
-.brand-name { font-size: 22px; font-weight: 500; }
-.brand-sub { font-size: 22px; color: var(--grey-700); }
-.logo { display: grid; grid-template-columns: repeat(2, 9px); gap: 3px; }
-.logo i { width: 9px; height: 9px; border-radius: 50%; display: block; }
-.logo .b { background: var(--blue); } .logo .r { background: var(--red); }
-.logo .y { background: var(--yellow); } .logo .g { background: var(--green); }
-.logo.big { grid-template-columns: repeat(2, 14px); gap: 5px; margin-bottom: 18px; }
-.logo.big i { width: 14px; height: 14px; }
-.account { display: flex; align-items: center; gap: 12px; }
-.who { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.25; }
-.who strong { font-weight: 500; }
-.who small { color: var(--grey-700); font-size: 12px; }
-.avatar {
-  display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%;
-  background: var(--green); color: #fff; font-weight: 500;
-}
-
-/* Sign-in */
-.signin-wrap { display: grid; place-items: center; padding: 64px 16px; }
-.signin {
-  width: min(420px, 100%); padding: 40px 36px; border: 1px solid var(--grey-300); border-radius: 16px;
-  display: flex; flex-direction: column; align-items: center; text-align: center;
-}
-.signin h1 { font-size: 24px; font-weight: 400; }
-.signin p { color: var(--grey-700); margin: 8px 0 24px; }
-.field { width: 100%; text-align: left; display: flex; flex-direction: column; gap: 6px; margin-bottom: 20px; }
-.field span { font-size: 12px; color: var(--grey-700); font-weight: 500; }
-.field input {
-  height: 48px; padding: 0 14px; border: 1px solid var(--grey-300); border-radius: 8px;
-  font: inherit; font-size: 16px; text-transform: uppercase;
-}
-.field input:focus { border-color: var(--blue); outline: 1px solid var(--blue); }
-.field input::placeholder { text-transform: none; }
-.full { width: 100%; height: 40px; margin-top: 6px; }
-
 /* Page */
 .page { max-width: 1440px; margin: 0 auto; padding: 20px 24px 40px; }
 .banner {
@@ -444,8 +342,6 @@ const greeting = computed(() => {
   .side { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
 }
 @media (max-width: 640px) {
-  .topbar { padding: 0 12px; }
-  .brand-sub, .who { display: none; }
   .page { padding: 12px 12px 32px; }
   .stats { width: 100%; }
   .stat { flex: 1; min-width: 0; padding: 8px 10px; }
