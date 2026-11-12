@@ -4,12 +4,13 @@
 // The student and lecturer pages themselves are unchanged (owned by their teams).
 import { computed, ref, watch } from 'vue'
 import { getJson } from './api'
+import ChangePasswordPage from './auth/ChangePasswordPage.vue'
 import LoginPage from './auth/LoginPage.vue'
 import { loadSession, logout, session } from './auth/session'
 import AdminPage from './admin/AdminPage.vue'
 import SchedulePage from './admin/SchedulePage.vue'
 import LecturerPage from './lecturer/LecturerPage.vue'
-import { ROLE_PAGES, landingFor, legacyHashTarget, navigate, path } from './router'
+import { PASSWORD_PAGE, ROLE_PAGES, landingFor, legacyHashTarget, navigate, path } from './router'
 import StudentPage from './student/StudentPage.vue'
 
 const appName = ref('SClass')
@@ -23,6 +24,8 @@ const roleLabel = computed(() => ({ admin: 'Administrator', lecturer: 'Lecturer'
 const page = computed(() => {
   if (!checked.value) return 'loading'
   if (path.value === '/login') return 'login'
+  // A temporary password must be replaced first; nothing else is shown until then.
+  if (session.value?.must_change_password) return path.value === PASSWORD_PAGE ? 'password' : 'loading'
   if (session.value && ROLE_PAGES[path.value] === session.value.role) {
     return path.value === '/admin/schedule' ? 'schedule' : session.value.role
   }
@@ -52,14 +55,23 @@ async function resolve() {
     const next = ROLE_PAGES[current] ? `?next=${encodeURIComponent(current)}` : ''
     return navigate(`/login${next}`, { replace: true })
   }
+  if (user.must_change_password) {
+    if (current !== PASSWORD_PAGE) navigate(PASSWORD_PAGE, { replace: true })
+    return
+  }
   if (ROLE_PAGES[current] !== user.role) navigate(user.home, { replace: true })
 }
 
 function goAfterLogin(user) {
   const target = landingFor(user, new URLSearchParams(window.location.search).get('next'))
   // Pages outside this app (the backend-served scheduling page) need a full load.
-  if (ROLE_PAGES[target]) navigate(target, { replace: true })
+  if (ROLE_PAGES[target] || target === PASSWORD_PAGE) navigate(target, { replace: true })
   else window.location.replace(target)
+}
+
+async function sessionExpired() {
+  session.value = null
+  navigate('/login', { replace: true })
 }
 
 async function signOut() {
@@ -73,7 +85,7 @@ async function signOut() {
 watch(path, resolve, { immediate: true })
 window.addEventListener('hashchange', resolve)
 watch([page, appName], ([name, app]) => {
-  const titles = { login: 'Log in', student: 'Student timetable', lecturer: 'Lecturer timetable', admin: 'Admin', schedule: 'Schedule classes' }
+  const titles = { login: 'Log in', password: 'Change password', student: 'Student timetable', lecturer: 'Lecturer timetable', admin: 'Admin', schedule: 'Schedule classes' }
   document.title = titles[name] ? `${app} · ${titles[name]}` : app
 }, { immediate: true })
 </script>
@@ -90,7 +102,8 @@ watch([page, appName], ([name, app]) => {
       <span>Signed in as <strong>{{ session.name || session.email }}</strong> · {{ roleLabel }}</span>
       <button type="button" :disabled="loggingOut" @click="signOut">{{ loggingOut ? 'Logging out…' : 'Log out' }}</button>
     </div>
-    <StudentPage v-if="page === 'student'" :student-code="session.code || ''" />
+    <ChangePasswordPage v-if="page === 'password'" :app-name="appName" :user="session" @changed="navigate($event.home, { replace: true })" @expired="sessionExpired" />
+    <StudentPage v-else-if="page === 'student'" :student-code="session.code || ''" />
     <LecturerPage v-else-if="page === 'lecturer'" :app-name="appName" />
     <AdminPage v-else-if="page === 'admin'" />
     <SchedulePage v-else-if="page === 'schedule'" />

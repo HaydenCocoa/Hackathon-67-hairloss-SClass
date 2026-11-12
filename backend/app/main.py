@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from .auth import (AuthCookieMiddleware, SessionCache, SessionUser, create_auth_router, get_session,
+from .auth import (PASSWORD_PAGE, AuthCookieMiddleware, SessionCache, SessionUser, create_auth_router, get_session,
                    login_redirect, require_login, safe_next)
 from .config import AppSettings, PROJECT_ROOT, Settings, load_settings
 from .database import DatabaseHealth, check_database
@@ -106,13 +106,20 @@ def create_app(settings: Settings | None = None, frontend_dist: Path | None = No
         async def page(session: SessionUser | None = Depends(get_session)):
             if session is None:
                 return redirect(login_redirect(path))
-            if session.role != role:
-                return redirect(session.home)
+            if session.role != role or session.must_change_password:
+                return redirect(session.home)  # PASSWORD_PAGE while a temporary password is in use
             return index_file()
         app.get(path, include_in_schema=False)(page)
 
     for role, path in (("student", "/student"), ("lecturer", "/lecturer"), ("admin", "/admin"), ("admin", "/admin/schedule")):
         role_page(path, role)
+
+    @app.get(PASSWORD_PAGE, include_in_schema=False)
+    async def password_page(session: SessionUser | None = Depends(get_session)):
+        """Only for users who must replace a temporary password; others go home."""
+        if session is None:
+            return redirect("/login")
+        return index_file() if session.must_change_password else redirect(session.home)
 
     if (frontend_dist / "assets").is_dir():
         app.mount("/assets", StaticFiles(directory=frontend_dist / "assets"), name="assets")

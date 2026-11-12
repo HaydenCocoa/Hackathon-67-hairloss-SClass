@@ -24,6 +24,11 @@ from .config import SupabaseSettings
 
 Role = Literal["admin", "lecturer", "student"]
 HOME: dict[str, str] = {"admin": "/admin", "lecturer": "/lecturer", "student": "/student"}
+# Accounts created with a temporary password (admin page) carry this flag in Supabase
+# app_metadata, which only the server key can change. Until it is cleared, the user's
+# only page is PASSWORD_PAGE and other APIs answer 403 PASSWORD_CHANGE_REQUIRED.
+PASSWORD_FLAG = "must_change_password"
+PASSWORD_PAGE = "/change-password"
 ACCESS_COOKIE = "sclass_access"
 REFRESH_COOKIE = "sclass_refresh"
 REFRESH_MAX_AGE = 7 * 24 * 3600
@@ -40,6 +45,25 @@ class SessionUser(BaseModel):
     # Supabase Auth user id, used server-side for audit (schedule_changes.changed_by).
     # Never sent to the browser.
     auth_user_id: str = Field(exclude=True)
+    must_change_password: bool = False
+
+
+class PasswordChange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    current_password: str = Field(min_length=1, max_length=1024)
+    # Supabase Auth hashes with bcrypt, which uses at most 72 bytes.
+    new_password: str = Field(min_length=8, max_length=72)
+
+    @field_validator("new_password")
+    @classmethod
+    def fits_bcrypt(cls, value: str) -> str:
+        if len(value.encode("utf-8")) > 72:
+            raise ValueError("Use at most 72 bytes")
+        return value
+
+
+def password_change_required() -> HTTPException:
+    return auth_error(403, "PASSWORD_CHANGE_REQUIRED", "Change your temporary password to continue.")
 
 
 class LoginRequest(BaseModel):
@@ -145,11 +169,48 @@ class SupabaseAuth:
             return None
         raise auth_error(502, "AUTH_UNAVAILABLE", "Supabase could not verify the session. Try again.")
 
-    async def logout(self, access_token: str) -> None:
+    async def logout(self, access_token: str, scope: str | None = None) -> None:
+        """Revoke sessions: Supabase's default is all of the user's sessions; scope='local' only this one."""
         try:
-            await self.client.post(f"{self.url}/auth/v1/logout", headers=self._headers(access_token), timeout=self.timeout)
+            await self.client.post(f"{self.url}/auth/v1/logout", headers=self._headers(access_token), timeout=self.timeout,
+                                   params={"scope": scope} if scope else None)
         except httpx.HTTPError:
             pass  # Best effort; the cookies are cleared regardless.
+
+    async def set_password(self, access_token: str, password: str) -> None:
+        """Change the logged-in user's own password (Supabase `updateUser`). Supabase Auth
+        stores only a bcrypt hash; the password is never stored or logged here."""
+        response = await self._call("PUT", "/auth/v1/user", headers=self._headers(access_token), json={"password": password})
+        if response.status_code == 200:
+            return
+        try:
+            body = response.json()
+        except ValueError:
+            body = {}
+        body = body if isinstance(body, dict) else {}
+        error = str(body.get("error_code") or "")
+        if error == "same_password":
+            raise auth_error(422, "SAME_PASSWORD", "Choose a password different from your current one.")
+        if error == "weak_password":
+            detail = body.get("weak_password")
+            reasons = detail.get("reasons") if isinstance(detail, dict) else None
+            if isinstance(reasons, list) and "pwned" in reasons:
+                raise auth_error(422, "WEAK_PASSWORD", "This password has appeared in a data breach. Choose a different one.")
+            raise auth_error(422, "WEAK_PASSWORD", "This password is too weak for this site's rules. Use a longer password with a mix of letters, numbers and symbols.")
+        raise auth_error(502, "AUTH_UNAVAILABLE", "Supabase could not change the password. Try again.")
+
+    async def clear_password_flag(self, user_id: str) -> dict[str, Any]:
+        """Admin API (server key): clear the temporary-password flag; returns the updated user."""
+        response = await self._call("PUT", f"/auth/v1/admin/users/{quote(user_id, safe='')}", headers=self._headers(),
+                                    json={"app_metadata": {PASSWORD_FLAG: False}})
+        try:
+            body = response.json()
+        except ValueError:
+            body = None
+        if response.status_code != 200 or not isinstance(body, dict) or not body.get("id"):
+            raise auth_error(502, "PASSWORD_FLAG_NOT_CLEARED",
+                             "Your password was changed, but the change could not be recorded. Use your new password as the current one and try again.")
+        return body
 
     async def _rows(self, table: str, select: str, user_id: str) -> list[dict]:
         response = await self._call("GET", f"/rest/v1/{table}", headers=self._headers(),
@@ -167,6 +228,8 @@ class SupabaseAuth:
     async def session_for(self, user: dict[str, Any]) -> SessionUser | None:
         """Map a Supabase user to one role. Priority: admin > lecturer > student."""
         user_id, email = str(user["id"]), user.get("email")
+        metadata = user.get("app_metadata")
+        must_change = isinstance(metadata, dict) and metadata.get(PASSWORD_FLAG) is True
         for role, table, select, code_key in (
             ("admin", "admins", "id,full_name", None),
             ("lecturer", "lecturers", "id,full_name,lecturer_code", "lecturer_code"),
@@ -176,8 +239,9 @@ class SupabaseAuth:
             if rows:
                 row = rows[0]
                 return SessionUser(role=role, name=row.get("full_name") or "", email=email, profile_id=str(row["id"]),
-                                   code=row.get(code_key) if code_key else None, home=HOME[role],
-                                   auth_user_id=user_id)
+                                   code=row.get(code_key) if code_key else None,
+                                   home=PASSWORD_PAGE if must_change else HOME[role],
+                                   auth_user_id=user_id, must_change_password=must_change)
         return None
 
 
@@ -304,12 +368,15 @@ async def get_session(request: Request) -> SessionUser | None:
     return None
 
 
-def require_roles(*roles: str):
-    """Dependency for API routes: 401 when not logged in, 403 for other roles."""
+def require_roles(*roles: str, allow_password_change: bool = False):
+    """Dependency for API routes: 401 when not logged in, 403 for other roles, and
+    403 PASSWORD_CHANGE_REQUIRED while a temporary password is still in use."""
 
     async def dependency(session: SessionUser | None = Depends(get_session)) -> SessionUser:
         if session is None:
             raise auth_error(401, "AUTH_REQUIRED", "Log in to continue.")
+        if session.must_change_password and not allow_password_change:
+            raise password_change_required()
         if roles and session.role not in roles:
             raise auth_error(403, "FORBIDDEN_ROLE", "Your account cannot use this feature.")
         return session
@@ -319,6 +386,7 @@ def require_roles(*roles: str):
 
 require_login = require_roles()
 require_admin = require_roles("admin")
+require_any_session = require_roles(allow_password_change=True)
 
 
 def login_redirect(path: str) -> str:
@@ -344,9 +412,48 @@ def create_auth_router() -> APIRouter:
         return session
 
     @router.get("/me", response_model=SessionUser, responses={401: {}})
-    async def me(response: Response, session: SessionUser = Depends(require_login)):
+    async def me(response: Response, session: SessionUser = Depends(require_any_session)):
         response.headers["Cache-Control"] = "no-store"
         return session
+
+    @router.post("/change-password", response_model=SessionUser, responses={400: {}, 401: {}, 422: {}, 502: {}})
+    async def change_password(body: PasswordChange, request: Request, response: Response,
+                              session: SessionUser = Depends(require_any_session)):
+        """Replace the password (required after an admin-created temporary one).
+
+        1. Check the current password by signing in again; this also gives a fresh
+           session, so Supabase never asks for reauthentication.
+        2. Set the new password as the user (Supabase `updateUser`).
+        3. Clear the temporary-password flag with the server key.
+        4. Switch the cookies to the fresh session and revoke the old one."""
+        response.headers["Cache-Control"] = "no-store"
+        if body.new_password == body.current_password:
+            raise auth_error(422, "SAME_PASSWORD", "Choose a password different from your current one.")
+        if not session.email:
+            raise auth_error(400, "NO_EMAIL", "This account has no email address, so its password cannot be changed here.")
+        auth = SupabaseAuth(request.app.state.supabase_settings, request.app.state.http_client)
+        try:
+            tokens = await auth.password_login(session.email, body.current_password)
+        except HTTPException as error:
+            if isinstance(error.detail, dict) and error.detail.get("code") == "INVALID_CREDENTIALS":
+                # 400, not 401: a 401 would make the page send the user back to /login.
+                raise auth_error(400, "WRONG_PASSWORD", "Your current password is incorrect.")
+            raise
+        if str(tokens["user"].get("id")) != session.auth_user_id:
+            raise auth_error(400, "WRONG_PASSWORD", "Your current password is incorrect.")
+        await auth.set_password(tokens["access_token"], body.new_password)
+        user = await auth.clear_password_flag(session.auth_user_id) if session.must_change_password else tokens["user"]
+        updated = await auth.session_for(user)
+        if updated is None:
+            raise auth_error(403, "ACCOUNT_NOT_LINKED", "This account is not linked to an admin, lecturer or student record. Contact an administrator.")
+        old_access = getattr(request.state, "access_token", None) or request.cookies.get(ACCESS_COOKIE)
+        cache: SessionCache = request.app.state.auth_sessions
+        cache.drop(old_access)
+        if old_access:
+            await auth.logout(old_access, scope="local")
+        queue_session_cookies(request, tokens)
+        cache.put(tokens["access_token"], updated)
+        return updated
 
     @router.post("/logout")
     async def logout(request: Request, response: Response):

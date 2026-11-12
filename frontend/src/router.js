@@ -3,6 +3,9 @@ import { ref } from 'vue'
 
 // Page path -> the role allowed to open it.
 export const ROLE_PAGES = { '/student': 'student', '/lecturer': 'lecturer', '/admin': 'admin', '/admin/schedule': 'admin' }
+// The only page for a user who still has an admin-created temporary password
+// (session.must_change_password; the backend then sets session.home to this path).
+export const PASSWORD_PAGE = '/change-password'
 
 export const path = ref(window.location.pathname)
 

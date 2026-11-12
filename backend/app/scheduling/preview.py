@@ -231,6 +231,8 @@ def create_preview_router(settings: Settings) -> APIRouter:
     async def admin_access(session: SessionUser | None = Depends(get_session)) -> SessionUser:
         if session is None:
             raise failure(401, "AUTH_REQUIRED", "Log in as an administrator to use the scheduling tools.", "access_rejected")
+        if session.must_change_password:
+            raise failure(403, "PASSWORD_CHANGE_REQUIRED", "Change your temporary password to continue.", "access_rejected")
         if session.role != "admin":
             raise failure(403, "ADMIN_REQUIRED", "Only administrators can use the scheduling tools.", "access_rejected")
         return session
@@ -439,7 +441,7 @@ def create_preview_router(settings: Settings) -> APIRouter:
         no_store = {"Cache-Control": "no-store"}
         if session is None:
             return RedirectResponse(login_redirect(PAGE_PATH), status_code=303, headers=no_store)
-        if session.role != "admin":
+        if session.role != "admin" or session.must_change_password:
             return RedirectResponse(session.home, status_code=303, headers=no_store)
         html = (ASSETS / "index.html").read_text(encoding="utf-8").replace("__CAMPUS_TIMEZONE__", escape(settings.scheduling.timezone, quote=True))
         return HTMLResponse(html, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
