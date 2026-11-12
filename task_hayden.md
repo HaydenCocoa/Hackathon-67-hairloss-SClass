@@ -224,6 +224,7 @@ Accepted 11 November 2026: no stored draft (leaving the page loses the preview);
 
 ## 11. Add rescheduling, cancellation, and reservations
 
+- [x] Add a `rescheduled` booking status for a class moved by a lecturer/admin; it occupies resources like `scheduled` (migration `202611120001`, 12 Nov; hosted run pending). See [rescheduled status](docs/backend/rescheduled-status.md).
 - [ ] Reuse calendar rules, candidate search, and booking validation.
 - [ ] Find and rank alternative placements for an existing occurrence.
 - [ ] Keep other classes fixed during ordinary single-class rescheduling.

@@ -330,6 +330,36 @@ def test_empty_demand_and_no_meetings_are_valid_inputs(provider):
     assert snapshot.class_bookings == ()
 
 
+def test_rescheduled_bookings_load_and_block_like_scheduled_ones(provider):
+    _, state = provider
+    data = state["payload"]
+    for row in data["class_bookings"]:
+        row["status"] = "rescheduled"
+    for row in data["requirements"]:
+        if row["booking_status"] == "scheduled":
+            row["booking_status"] = "rescheduled"
+    snapshot = read(provider)
+    assert len(snapshot.pending_requirements) == 1
+    assert len(snapshot.class_bookings) == len(data["class_bookings"])
+    assert all(row.status == "rescheduled" for row in snapshot.class_bookings)
+    query = next(call for call in state["calls"] if call["path"] == "/rest/v1/class_session_details")
+    assert query["parameters"]["status"] == 'in.("rescheduled","scheduled")'
+    lesson = snapshot.pending_requirements[0]
+    blocked = validate_booking(snapshot, BookingProposal(
+        occurrence_id=lesson.occurrence_id, room_id=UUID(int=60), starts_at="2026-11-09T14:43:00+08:00",
+    ))
+    assert blocked.reason_codes == ("STUDENT_CONFLICT",)
+
+
+def test_cancelled_booking_is_not_read_as_a_blocker(provider):
+    _, state = provider
+    data = state["payload"]
+    extra = copy.deepcopy(data["class_bookings"][0])
+    extra.update(id=uid(9999), occurrence_id=None, status="cancelled")
+    data["class_bookings"].append(extra)
+    assert all(row.id != UUID(int=9999) for row in read(provider).class_bookings)
+
+
 def test_cancelled_unbooked_lesson_does_not_become_pending(provider):
     _, state = provider
     pending(state["payload"]).update(requirement_status="cancelled", needs_scheduling=False)

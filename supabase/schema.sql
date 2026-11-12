@@ -92,10 +92,12 @@ create table public.class_sessions (
   section_id uuid not null references public.class_sections(id),
   room_id uuid references public.rooms(id),
   starts_at timestamptz not null,
+  -- 'rescheduled' is an active booking moved by a lecturer/admin; only 'cancelled' frees the slot.
   status text not null default 'scheduled'
-    check (status in ('scheduled', 'cancelled')),
+    constraint class_sessions_status_check
+    check (status in ('scheduled', 'rescheduled', 'cancelled')),
   constraint scheduled_class_requires_room
-    check (status <> 'scheduled' or room_id is not null)
+    check (status not in ('scheduled', 'rescheduled') or room_id is not null)
 );
 
 create table public.meeting_sessions (
@@ -137,7 +139,7 @@ create index offerings_lecturer_idx on public.course_offerings(lecturer_id);
 create index sections_group_idx on public.class_sections(group_number);
 create index class_sessions_section_time_idx on public.class_sessions(section_id, starts_at);
 create index class_sessions_room_time_idx on public.class_sessions(room_id, starts_at)
-  where status = 'scheduled';
+  where status in ('scheduled', 'rescheduled');
 create index meetings_lecturer_time_idx on public.meeting_sessions(lecturer_id, starts_at)
   where status = 'scheduled';
 create index meetings_room_time_idx on public.meeting_sessions(room_id, starts_at)

@@ -58,7 +58,7 @@ No database schema or hosted data was changed for step 1. No frontend change was
 | 8 | Configurable objectives for student gaps, lecturer gaps, and room utilization | Postponed by the user; future enhancement |
 | 9 | Selected-intake/group preview API and test page including assignments, diagnostics, and scope-bound input revision; quality deferred | Complete and verified locally; direct localhost/development access only |
 | 10 | Authorized, transactional commits with revalidation, concurrency control, audit, and retry protection | Save implemented and verified locally on 11 Nov (recheck-then-single-insert). Admin login required since 12 Nov ([login](login.md)); save audit still to do. Not run against hosted Supabase |
-| 11 | Safe rescheduling, cancellation, and fixed future reservations | Planned |
+| 11 | Safe rescheduling, cancellation, and fixed future reservations | Planned. `rescheduled` booking status added 12 Nov ([details](rescheduled-status.md)); hosted SQL run pending |
 | 12 | Verified requirements-to-generation-to-commit-to-retrieval workflow and acceptance scenarios | Planned |
 
 ## Verification and completion record
@@ -305,3 +305,24 @@ Historical discussion; superseded by the implementation record below after the u
 - **Code change:** a backend service rooted at `backend/` does not deploy `Config/config.json`, so its build step copies the file into `backend/Config/`, and `default_config_path()` falls back to that copy only when the repository copy is missing. `Config/config.json` remains the single source of truth. Details and reasons: [Vercel deployment](vercel-deployment.md).
 - **Verification:** new config-path test passed; full backend suite 194 passed with the same 10 pre-existing failures and 95 errors as `main`; `npm run build` succeeded; a simulated backend-only bundle served `/api/health` and `/api/config`. `vercel dev` and a real deployment have not been run.
 - **Follow-ups:** confirm service names/public paths/bindings; set `SUPABASE_URL` and `SUPABASE_KEY` in the Vercel project; run `vercel dev` and a preview deployment; check bundle size, the SPA fallback and the cookie `Secure` flag on Vercel.
+
+## `rescheduled` class-session status — 12 November 2026
+
+- Work done on branch `backend-enhancement`, created from `main` at the user's request. The user will continue other work on this branch.
+- **Requirement:** keep the database restriction on `class_sessions.status`, but add `rescheduled`, used when a lecturer or admin moves a scheduled class. The user first considered removing the restriction completely. They chose a specific value after reviewing the impact: unrestricted values would silently free the slot in the scheduler while the pages still showed an active class.
+- **Decision:** `rescheduled` is an active booking that has been moved in place (`occurrence_id` is unique, so there is no second row). It blocks room, lecturer and students like `scheduled`, needs a room, and is not outstanding demand. Only `cancelled` releases a slot. Meetings are unchanged.
+- **Implemented:**
+  - Migration `202611120001_class_session_rescheduled_status.sql` (constraints, partial index, three step 2 trigger functions), plus matching `schema.sql`.
+  - One shared status definition in `scheduling/requirements.py`, used by the loader and validator.
+  - The lecturer/admin reschedule endpoint writes `rescheduled`, refuses cancelled classes with 409, and reports `moved` from the status.
+  - Details, SQL and setup order: [rescheduled status](rescheduled-status.md).
+- **Verification:**
+  - New database test: 33 checks passed. All six existing database suites still pass.
+  - New loader and updated auth tests passed.
+  - The full backend suite has the same failures as `main` (10 failed, 95 pre-existing errors), plus 2 new validator tests. Those 2 error only because of the existing broken `required_room_type` fixture, and passed in a temporary corrected copy.
+  - Not run on hosted Supabase.
+- **Follow-ups:**
+  - The user runs the migration on Supabase.
+  - The lecturer endpoint still writes without validation or audit (step 11).
+  - The validator fixture still needs fixing.
+  - The unused `load_scheduling_data` RPC still filters only `scheduled`.

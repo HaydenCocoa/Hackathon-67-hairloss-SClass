@@ -14,7 +14,7 @@ from ..config import CourseType, RoomType, SchedulingSettings
 from ..student import Supabase, in_list
 from ..observability import event
 from .calendar import TeachingCalendar
-from .requirements import TeachingOccurrence
+from .requirements import ACTIVE_BOOKING_STATUSES, ActiveBookingStatus, TeachingOccurrence
 
 
 class SchedulingDataError(ValueError):
@@ -108,7 +108,7 @@ class _ClassRow(_Interval):
     lecturer_id: UUID
     room_id: UUID
     duration_minutes: int = Field(gt=0, strict=True)
-    status: Literal["scheduled"]
+    status: ActiveBookingStatus
 
     @model_validator(mode="after")
     def derived_duration(self) -> "_ClassRow":
@@ -231,7 +231,7 @@ async def load_scheduling_snapshot(
     ])
     class_rows = await fetch_all("load_class_bookings", "class_session_details", [
         ("select", "id,section_id,room_id,starts_at,ends_at,status,group_number,intake_id,lecturer_id,duration_minutes"),
-        ("status", "eq.scheduled"), ("starts_at", f"lt.{end_iso}"), ("ends_at", f"gt.{start_iso}"),
+        ("status", in_list(ACTIVE_BOOKING_STATUSES)), ("starts_at", f"lt.{end_iso}"), ("ends_at", f"gt.{start_iso}"),
         ("order", "id.asc"),
     ])
     if class_rows:
@@ -347,7 +347,7 @@ async def load_scheduling_snapshot(
             raise SchedulingDataError("TIMEZONE_MISMATCH", "A teaching plan's timezone differs from the scheduling calendar.")
         resource_refs(item.lecturer_id, item.room_id)
         students = roster_for(item.section_id, item.intake_id, item.group_number)
-        expected_pending = item.requirement_status == "required" and item.booking_status != "scheduled"
+        expected_pending = item.requirement_status == "required" and item.booking_status not in ACTIVE_BOOKING_STATUSES
         if item.needs_scheduling != expected_pending:
             raise SchedulingDataError("STATE_MISMATCH", "A teaching occurrence has inconsistent scheduling state.")
         if item.class_session_id is None:
@@ -355,7 +355,7 @@ async def load_scheduling_snapshot(
                 raise SchedulingDataError("STATE_MISMATCH", "An unbooked occurrence contains booking fields.")
         elif item.booking_status is None or item.starts_at is None:
             raise SchedulingDataError("STATE_MISMATCH", "A linked occurrence is missing its booking state.")
-        if item.booking_status == "scheduled":
+        if item.booking_status in ACTIVE_BOOKING_STATUSES:
             booking = classes.get(item.class_session_id)
             if (booking is None or item.requirement_status != "required" or
                 (booking.occurrence_id, booking.section_id, booking.lecturer_id, booking.room_id,

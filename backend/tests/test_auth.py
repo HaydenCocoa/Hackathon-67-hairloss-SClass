@@ -36,7 +36,8 @@ TABLES = {
                   {"id": uid(204), "full_name": "Bo Both", "lecturer_code": "LEC004", "auth_user_id": uid(4)}],
     "students": [{"id": uid(301), "full_name": "Sam Student", "student_code": "TP000001", "auth_user_id": uid(3),
                   "student_intakes": []}],
-    "class_session_details": [{"id": uid(401), "lecturer_id": uid(202)}],
+    "class_session_details": [{"id": uid(401), "lecturer_id": uid(202), "status": "scheduled"},
+                              {"id": uid(402), "lecturer_id": uid(202), "status": "cancelled"}],
     "class_sessions": [],
 }
 
@@ -84,8 +85,8 @@ def supabase(monkeypatch):
             self.reply(404, {})
 
         def do_PATCH(self):
-            self.rfile.read(int(self.headers.get("Content-Length", 0)))
-            state["calls"].append({"method": "PATCH", "path": urlsplit(self.path).path})
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+            state["calls"].append({"method": "PATCH", "path": urlsplit(self.path).path, "body": body})
             self.send_response(204)
             self.end_headers()
 
@@ -275,7 +276,10 @@ def test_admin_can_read_any_record_and_reschedule_on_behalf(supabase, frontend):
         assert c.get("/api/student/TP000001").status_code == 200
         move = {"session_date": "2026-11-20", "start_time": "10:00", "room_id": uid(9)}
         assert c.patch(f"/api/lecturers/{uid(202)}/sessions/{uid(401)}", json=move).status_code == 200
-    assert any(call["method"] == "PATCH" for call in state["calls"])
+        # A cancelled class cannot be moved (that would silently reactivate it).
+        assert c.patch(f"/api/lecturers/{uid(202)}/sessions/{uid(402)}", json=move).status_code == 409
+    patches = [call for call in state["calls"] if call["method"] == "PATCH"]
+    assert len(patches) == 1 and patches[0]["body"]["status"] == "rescheduled"
 
 
 def test_scheduling_page_and_apis_require_an_admin(supabase, frontend):

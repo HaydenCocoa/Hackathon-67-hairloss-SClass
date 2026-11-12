@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
 from .loader import ClassRequirement, SchedulingSnapshot
+from .requirements import ACTIVE_BOOKING_STATUSES
 
 ProposalMode = Literal["schedule", "reschedule"]
 
@@ -95,11 +96,11 @@ class BookingValidator:
             return (BookingIssue(code="OCCURRENCE_NOT_FOUND", detail="The occurrence is not present in this week's scheduling input."),)
         if item.requirement_status == "cancelled":
             return (BookingIssue(code="OCCURRENCE_CANCELLED", detail="Explicitly reopen the teaching requirement before scheduling a replacement."),)
-        if mode == "schedule" and item.booking_status == "scheduled":
+        if mode == "schedule" and item.booking_status in ACTIVE_BOOKING_STATUSES:
             return (BookingIssue(code="ALREADY_SCHEDULED", detail="This occurrence already has a booking; use reschedule mode to move it."),)
         if mode == "reschedule":
-            if item.booking_status != "scheduled":
-                return (BookingIssue(code="NOT_SCHEDULED", detail="Reschedule mode requires an existing scheduled booking."),)
+            if item.booking_status not in ACTIVE_BOOKING_STATUSES:
+                return (BookingIssue(code="NOT_SCHEDULED", detail="Reschedule mode requires an existing active (scheduled or rescheduled) booking."),)
             if not any(booking.id == item.class_session_id and booking.occurrence_id == item.occurrence_id
                        for booking in self.snapshot.class_bookings):
                 return (BookingIssue(code="ORIGINAL_BOOKING_NOT_FOUND", detail="The occurrence's original booking is missing from this snapshot."),)
@@ -136,7 +137,7 @@ class BookingValidator:
         original_id = item.class_session_id if mode == "reschedule" else None
         intervals = []
         for kind, booking in self._bookings:
-            if booking.status != "scheduled":
+            if booking.status not in ACTIVE_BOOKING_STATUSES:
                 continue
             if (kind == "class" and original_id is not None and booking.id == original_id
                     and booking.occurrence_id == item.occurrence_id):

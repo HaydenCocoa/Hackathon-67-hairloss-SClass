@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from .auth import SessionUser, require_login, require_roles
 from .config import SupabaseSettings
+from .scheduling.requirements import ACTIVE_BOOKING_STATUSES
 
 # Classes are scheduled and shown in Malaysia time (UTC+8, no daylight saving).
 MY_TZ = timezone(timedelta(hours=8))
@@ -150,8 +151,8 @@ def create_lecturer_router(settings: SupabaseSettings) -> APIRouter:
                 "duration_minutes": s["duration_minutes"],
                 "required_room_type": s.get("required_room_type", "classroom"),
                 "status": s["status"],
-                "moved": False,
-                "can_reschedule": s["status"] == "scheduled" and starts_dt > now_utc.astimezone(MY_TZ)
+                "moved": s["status"] == "rescheduled",
+                "can_reschedule": s["status"] in ACTIVE_BOOKING_STATUSES and starts_dt > now_utc.astimezone(MY_TZ)
             })
             return results
         except HTTPException:
@@ -168,15 +169,18 @@ def create_lecturer_router(settings: SupabaseSettings) -> APIRouter:
         check_own_lecturer(session, lecturer_id)
         db = Supabase(settings, request.app.state.http_client)
         # The class must belong to this lecturer; otherwise anyone could move any class.
-        owned = await db.get("class_session_details", [("select", "id,lecturer_id"), ("id", f"eq.{session_id}")])
+        owned = await db.get("class_session_details", [("select", "id,lecturer_id,status"), ("id", f"eq.{session_id}")])
         if not owned:
             raise HTTPException(404, {"message": "Class not found.", "conflicts": []})
         if str(owned[0].get("lecturer_id")) != lecturer_id:
             raise HTTPException(403, {"message": "You can only change your own classes.", "conflicts": []})
+        # Only an active class can be moved; moving must never reactivate a cancelled one.
+        if owned[0].get("status") not in ACTIVE_BOOKING_STATUSES:
+            raise HTTPException(409, {"message": "Only a scheduled or rescheduled class can be moved.", "conflicts": []})
 
         new_starts_at = f"{payload.session_date}T{payload.start_time}:00+08:00"
         url = f"{db.url}/rest/v1/class_sessions?id=eq.{session_id}"
-        data = {"starts_at": new_starts_at, "room_id": payload.room_id}
+        data = {"starts_at": new_starts_at, "room_id": payload.room_id, "status": "rescheduled"}
         
         try:
             res = await db.client.patch(url, headers=db.headers, json=data)

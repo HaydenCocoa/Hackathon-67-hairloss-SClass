@@ -207,6 +207,22 @@ def test_cancelled_booking_does_not_block_availability(snapshot):
     assert validate_booking(snapshot, proposed(snapshot)).valid
 
 
+def test_rescheduled_booking_blocks_like_a_scheduled_one(snapshot):
+    fixed = booking(lecturer_id=uid(20), room_id=uid(1), student_ids=frozenset([uid(10)]), status="rescheduled")
+    snapshot = snapshot.model_copy(update={"class_bookings": (fixed,)})
+    assert validate_booking(snapshot, proposed(snapshot)).reason_codes == (
+        "LECTURER_CONFLICT", "STUDENT_CONFLICT", "ROOM_CONFLICT")
+
+
+def test_rescheduled_occurrence_is_booked_and_can_be_moved_again(snapshot):
+    snapshot = with_original(snapshot)
+    original = snapshot.class_bookings[0].model_copy(update={"status": "rescheduled"})
+    snapshot = change_requirement(snapshot, booking_status="rescheduled")
+    snapshot = snapshot.model_copy(update={"class_bookings": (original,)})
+    assert validate_booking(snapshot, proposed(snapshot)).reason_codes == ("ALREADY_SCHEDULED",)
+    assert validate_booking(snapshot, proposed(snapshot, mode="reschedule")).valid
+
+
 def test_rescheduling_ignores_only_matching_original_class(snapshot):
     snapshot = with_original(snapshot)
     assert validate_booking(snapshot, proposed(snapshot)).reason_codes == ("ALREADY_SCHEDULED",)
