@@ -1,6 +1,6 @@
 # Backend record
 
-Last updated: 11 November 2026 (Asia/Kuala_Lumpur).
+Last updated: 12 November 2026 (Asia/Kuala_Lumpur).
 
 ## Documentation convention
 
@@ -296,3 +296,12 @@ Historical discussion; superseded by the implementation record below after the u
 - **Implemented:** `backend/app/auth.py` (login/logout/me, Supabase token verification with a 60-second cache, automatic refresh, cookie middleware, role lookup, `require_roles`); server-side page redirects in `main.py`; access checks for the student, lecturer, database-health and scheduling endpoints. The lecturer reschedule endpoint now also checks that the class belongs to the lecturer (previously anyone could move any class). Frontend: a small path router, login page, empty admin page, session bar with log out, and a redirect to `/login` when any API call returns 401.
 - **Verification:** 23 new backend auth tests passed; full backend suite 193 passed with the same 10 pre-existing failures and 95 errors as `main`; 7 new frontend tests and the 12 existing lecturer tests passed; `npm run build` succeeded; 19 scheduling page tests passed, including served-page tests that log in as a synthetic admin. Not verified against hosted Supabase or in a real browser.
 - **Follow-ups:** create and link accounts in Supabase (steps in [login](login.md)); save audit using the logged-in admin; the student/lecturer page READMEs still mention `#/` addresses (owned by those pages' authors).
+
+## Vercel services deployment — 12 November 2026
+
+- Work done on branch `feature-vercel-services`, created from `main` at the user's request.
+- **Requirement:** deploy the repository on Vercel as one project with services, using a root `vercel.json`.
+- **Implemented (pending the user's confirmation of names and routing):** services `backend` (`backend/`, FastAPI, entrypoint `app.main:app`, public at `/api/*`) and `frontend` (`frontend/`, Vite, public catch-all with an `index.html` fallback for the Vue path router). No bindings, because no service calls another from server-side code; the browser calls same-origin `/api/...`. `/admin/development/*`, `/docs` and `/openapi.json` are not publicly routed.
+- **Code change:** a backend service rooted at `backend/` does not deploy `Config/config.json`, so its build step copies the file into `backend/Config/`, and `default_config_path()` falls back to that copy only when the repository copy is missing. `Config/config.json` remains the single source of truth. Details and reasons: [Vercel deployment](vercel-deployment.md).
+- **Verification:** new config-path test passed; full backend suite 194 passed with the same 10 pre-existing failures and 95 errors as `main`; `npm run build` succeeded; a simulated backend-only bundle served `/api/health` and `/api/config`. `vercel dev` and a real deployment have not been run.
+- **Follow-ups:** confirm service names/public paths/bindings; set `SUPABASE_URL` and `SUPABASE_KEY` in the Vercel project; run `vercel dev` and a preview deployment; check bundle size, the SPA fallback and the cookie `Secure` flag on Vercel.

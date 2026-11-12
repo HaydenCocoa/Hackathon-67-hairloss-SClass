@@ -289,6 +289,18 @@ All acceptance scenarios must pass before treating the scheduling backend as rea
 
 **Complete when:** each role can log in, is limited to its own data, and every protected page redirects to `/login` when not logged in. Locally verified on 12 November; hosted verification pending.
 
+## Vercel deployment with services (added 12 November 2026)
+
+- [x] Add a root `vercel.json` with `backend` (FastAPI, public at `/api/*`) and `frontend` (Vite, public catch-all with SPA fallback) services; no bindings needed.
+- [x] Make the backend find `Config/config.json` when only `backend/` is deployed (build-time copy + fallback path), with a test.
+- [ ] Confirm service names, public paths and bindings with the user.
+- [ ] Set `SUPABASE_URL` and `SUPABASE_KEY` in the Vercel project.
+- [ ] Run `vercel dev` and a preview deployment; check bundle size, SPA fallback and the cookie `Secure` flag.
+
+Details: [Vercel deployment](docs/backend/vercel-deployment.md).
+
+**Complete when:** a Vercel preview deployment serves the pages and `/api/*` on one domain and login works there.
+
 ## Suggested delivery milestones
 
 | Milestone | Steps | Reviewable result |
