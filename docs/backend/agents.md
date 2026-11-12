@@ -1,6 +1,6 @@
 # Backend record
 
-Last updated: 12 November 2026 (Asia/Kuala_Lumpur).
+Last updated: 13 November 2026 (Asia/Kuala_Lumpur).
 
 ## Documentation convention
 
@@ -120,6 +120,13 @@ The single list of what is left (moved here from the removed `task_hayden.md` on
 **Step 4 / tests:**
 - Verify the direct-read loader against real data.
 - Update the 10 older loader/preview tests that still expect the removed RPC or the `required_room_type` field.
+
+**Admin page (12 November 2026 changes)**
+- Check the intake-student endpoints and the intake list's embedded counts against hosted Supabase ([entry](#admin-page-clean-up-intake-students-and-intake-charts--12-november-2026)).
+
+**Admin page (13 November 2026 changes)**
+- On hosted Supabase, add one test student and one test lecturer, log in with each temporary password, change it on `/change-password`, then delete both test logins ([admin-created logins](admin-accounts.md), [forced change](login.md#forced-password-change)). This checks that `SUPABASE_KEY` may use the Auth admin API, that the project's password rules accept code + 4 digits, and that the flag is cleared.
+- Not built (would need a new request): deleting a lecturer's login together with the lecturer, and a voluntary "change password" link.
 
 **Deferred by the user (12 November 2026, not a priority; scheduling stays as it is)**
 - A "fewer days on campus" preference.
@@ -761,3 +768,104 @@ Historical discussion; superseded by the implementation record below after the u
   - Backend: 7 new solver/endpoint tests and 3 validation cases. A real CP-SAT search with a 30 s limit (a hard "market split" model) stopped about 0.5 s after Pause. Pause during improvement keeps the first valid timetable. Only the same admin can pause; logged-out 401, lecturer 403, wrong origin 403, bad bodies 422. `test_solver.py` + `test_schedule_preview.py`: 93 passed, with the same 2 failures as before this change (provider 401 code, timeout/missing config).
   - Frontend: 25/25 admin page tests (3 new for Pause); build succeeds.
   - Headless Edge against the real backend on synthetic data, with a solver that waits for Pause. Checked: Pause shown while generating; paused with no timetable; paused with a timetable kept and Schedule enabled; a refused stop (page stops waiting, and the server stopped its search about 1.5 s later because the connection closed); next Generate runs at once; phone layout. Not run against hosted Supabase or Vercel.
+
+## Admin page clean-up, intake students and intake charts — 12 November 2026
+
+- **Requirement (user, 12 November 2026)** for the `/admin` page:
+  1. Remove the "Main menu" link. It had already been removed on `main`; the leftover `<title>SClass · Main menu</title>` in `frontend/index.html` is now `SClass`.
+  2. Remove the access-token banner, including "Connect" and "Try local demo". The page now uses only the admin's login cookie and loads on open. The backend still accepts a pasted Bearer token, which the page no longer sends.
+  3. Remove the course type from the Courses page.
+  4. Remove the Students tab. Students are now reached only from Intakes > **Students**.
+  5. Show charts and figures for the intakes: students and groups.
+- **Decisions and reasons:**
+  - **Course type kept in the database.** It is still required (`courses.course_type`, unique with `course_code`) and drives the scheduler's room policy. `Course.course_type` is now optional in the API: a new course without it is saved as `lecture`, and an edit without it keeps the stored type. Limitation: from the page, a second row with the same code (for example a CS101 lab next to the CS101 lecture) cannot be created, because it would default to `lecture` and clash with the unique key.
+  - **Students are managed per intake** because a student's group belongs to the student–intake membership (`student_intakes`), not to the student.
+- **Backend** (`backend/app/admin.py`); all routes are admin-only, like the rest of `/api/admin`:
+  - `GET /api/admin/intakes/{id}/students`: the intake's students with `group_number`. The account link (`auth_user_id`) is not returned.
+  - `POST /api/admin/intakes/{id}/students` with `{student_code, full_name, age?, group_number}`.
+    - A code that already exists links that student as they are; their name and age are not changed, and the reply says `existing: true`.
+    - Otherwise the request creates the student, then the membership. These are two writes, not one transaction: if the membership is refused (for example a group above `max_group`), the new student row is deleted again.
+  - `PUT /api/admin/intakes/{id}/students/{student_id}`: updates code, name and age, then the group.
+  - `DELETE /api/admin/intakes/{id}/students/{student_id}`: removes the membership. The student record is deleted as well only when the student is in no other intake and has no linked login. If something else (such as a meeting) still uses it, the record is kept and the reply says `student_deleted: false`.
+  - `GET /api/admin/intakes` now embeds `student_intakes(student_id, group_number)` and `course_offerings(id)` so the page can count students, groups and courses. The group-number check failure (`23514`) now returns 422 with a readable message.
+- **Frontend** (`frontend/src/admin/`):
+  - `AdminPage.vue`: tabs Courses, Lecturers, Intakes, Timetable. Demo data was removed. A 401 sends the admin to `/login?next=/admin`.
+  - `IntakesView.vue`:
+    - figures: intakes, distinct students, groups, and the average students per group (over groups that have students);
+    - a "Students per intake" bar chart whose hover/focus tooltip shows the split by group;
+    - add, edit and delete intakes;
+    - a **Students** button for each intake.
+  - `IntakeStudents.vue`:
+    - figures: students, groups, largest and smallest group;
+    - a "Students per group" chart that includes empty groups;
+    - group filter and search;
+    - add, edit and remove students.
+  - `BarList.vue` draws the single-series bar chart. `adminApi.js` handles requests; `intakeStats.js` holds the pure counting helpers.
+  - `RoomTimetable.vue` is unchanged; its token and demo props now stay at their defaults.
+- **Verification:**
+  - New `backend/tests/test_admin_intake_students.py`: 7 passed. Together with `test_admin_timetable.py`: 8 passed.
+  - Full backend suite: 241 passed, 2 failed, 122 skipped. The 2 failures (`test_auth.py::test_admin_can_read_any_record_and_reschedule_on_behalf`, `::test_lecturer_timetable_shows_the_real_intake_code_and_group_size`) fail the same way on unmodified `main`.
+  - Frontend: `node --test src/admin/*.test.js` 17/17, including the new `intakeStats.test.js`; `vite build` succeeds.
+  - Headless Edge walkthrough of the built page against a scratchpad mock API with synthetic data (no Supabase):
+    - Courses, Intakes (with a tooltip shown) and an intake's Students view;
+    - 1280 px and 390 px widths, with no horizontal scrolling and no console errors.
+  - Not checked against hosted Supabase. That includes the PostgREST embeds (`students(*)` from `student_intakes`, and `student_intakes`/`course_offerings` from `intakes`), which rely on the existing foreign keys.
+
+## Admin search and logins for new students and lecturers — 13 November 2026
+
+- **Requirement (user, 13 November 2026):**
+  1. Search for Intakes, Courses and Lecturers on the admin page.
+  2. An email field on Add student and Add lecturer. Creating the user also creates a temporary password: their TP number plus 4 random digits. Follow Supabase's documentation on password encryption and authentication.
+- **Decisions and reasons:**
+  - **Search is in the browser.** The lists are already fully loaded, so filtering them needs no new API. It is case-insensitive, and every typed word must appear. Courses match code, name or linked intake codes; lecturers match code or name; intakes match the intake code.
+  - **The TP number is the record's code** (`student_code`, `lecturer_code`).
+  - **Supabase Auth hashes the password (bcrypt, per-password salt); the backend does not.** It creates the login with the Auth admin API and the server-only key, sends the password once over HTTPS, returns it once to the admin, and never stores or logs it. The sources and how each is applied are in [admin-created logins](admin-accounts.md).
+  - **An existing student code still only links the existing student.** No login is created and the email is ignored, so an existing login is never replaced.
+  - **An email that already has a login is refused (409), not linked,** so the page cannot take over another account.
+  - This changes login decision 2 for these two forms; [login](login.md) is updated. Sign-up and password reset stay out of scope. (A forced password change at first login was added later the same day; see the next entry.)
+- **Backend** (`backend/app/admin.py`):
+  - `POST /api/admin/intakes/{id}/students` accepts `email` (required for a new code). For a new code it creates the login, then the student with `auth_user_id`, then the membership.
+  - New `POST /api/admin/lecturers` (before the generic route) requires `email`, checks the code first, then creates the login and the lecturer row.
+  - On failure, earlier steps are undone in reverse order, including deleting the new login. Supabase Auth errors are mapped to 409/422/502 with readable messages.
+  - Replies with a password carry `Cache-Control: no-store`.
+- **Frontend** (`frontend/src/admin/`):
+  - New `search.js` (`matchesSearch`, `looksLikeEmail`) with `search.test.js`.
+  - `AdminPage.vue`: a search box for Courses and Lecturers, cleared on tab change; an Email field on Add lecturer only (not on edit).
+  - `IntakesView.vue`: a search box over the intake list. The chart and figures still cover all intakes.
+  - `IntakeStudents.vue`: an Email field on Add student only, and a note that an existing code keeps its login.
+  - New `NewLogin.vue`: the one-time "Login created" box with email, temporary password, **Copy** and **Done**.
+- **Side effects** (details in [admin-created logins](admin-accounts.md)):
+  - New students always have a login, so removing one from their last intake keeps the record.
+  - Deleting a lecturer leaves their login unlinked; login refuses it.
+- **Verification:**
+  - `test_admin_intake_students.py`: 12 passed (5 new, 2 updated for the login steps).
+  - Full backend suite: 246 passed, 2 failed, 122 skipped. The 2 failures are the same `test_auth.py` tests as in the previous entry (241 passed before; the 5 extra passes are the new tests).
+  - Frontend: `node --test src/admin/*.test.js` 20/20 (3 new); `vite build` succeeds.
+  - Not checked against hosted Supabase or in a browser, including the project's password rules and whether its `SUPABASE_KEY` may use the Auth admin API.
+
+## Forced password change at first login — 13 November 2026
+
+- **Requirement (user, 13 November 2026):** "When a new user logs into their interface require them to change their passwords." "New user" means an account created on the admin page with a temporary password (previous entry).
+- **Decisions and reasons:**
+  - **The flag is `app_metadata.must_change_password` in Supabase Auth,** set when the admin page creates the login. Users cannot change `app_metadata`, so they cannot skip the change, and no new table or migration is needed.
+  - **Enforced by the backend, not only the page.** While the flag is set, every page goes to `/change-password` and every other API answers 403 `PASSWORD_CHANGE_REQUIRED`.
+  - **The current password is asked for again** and checked by a fresh sign-in. This protects a left-open session, and the fresh session avoids Supabase's reauthentication requirement for password updates.
+  - **Not a password reset:** forgot-password stays out of scope. This keeps login rule "do not change the student or lecturer page components": the app shell shows a separate page instead of them.
+- **Backend:**
+  - `auth.py`: `SessionUser.must_change_password` (from `app_metadata`), with `home` set to `/change-password` while it is true. Also `require_roles(..., allow_password_change=False)`, the new `POST /api/auth/change-password`, `SupabaseAuth.set_password` / `clear_password_flag`, and `logout(scope=...)`.
+  - `main.py`: the `/change-password` page, and the role pages redirect while the flag is set. `admin.py` and `scheduling/preview.py`: the same block in their own session checks. `admin.py` sets the flag on create.
+  - Details: [login: forced password change](login.md#forced-password-change).
+- **Frontend:** `auth/ChangePasswordPage.vue` (current, new and confirm fields, show-passwords toggle, rules hint). `session.js` gains `changePassword` and `passwordProblem`, and `router.js` gains `PASSWORD_PAGE`. `App.vue` keeps a flagged user on that page and sends them to their home page after the change. The student and lecturer page components are unchanged.
+- **Verification:**
+  - New `backend/tests/test_password_change.py`: 4 passed, against a mock Supabase Auth. It covers:
+    - the blocked APIs and pages;
+    - wrong, same, short, too long and breached passwords;
+    - the flag cleared and the old session revoked;
+    - logging in with the new password, and not with the old one;
+    - a failed flag update;
+    - accounts without the flag.
+  - `test_admin_intake_students.py` (create body now has `app_metadata`): 12 passed.
+  - Full backend suite: 250 passed, 2 failed, 122 skipped. These are the same 2 `test_auth.py` failures as before.
+  - Frontend: `node --test src/auth/auth.test.js src/admin/*.test.js` 30/30 (3 new); `vite build` succeeds.
+  - After rebasing this work (with the two entries above) onto the updated `main` (branch `feature-admin-accounts`): full backend suite **312 passed, 0 failed, 132 skipped** (the 2 `test_auth.py` failures were fixed on `main`); frontend `src/auth/auth.test.js` + `src/admin/*.test.js` 40/40; `vite build` succeeds.
+  - Not checked against hosted Supabase or in a browser.

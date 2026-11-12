@@ -13,13 +13,14 @@ Everyone visiting the website must log in at `/login`. Roles are Admin, Student 
 | # | Topic | Decision |
 | --- | --- | --- |
 | 1 | Login identifier | Email + password from Supabase Auth. |
-| 2 | Accounts | Created and linked by the project owner in Supabase (see [Account setup](#account-setup)); the app never creates accounts. |
+| 2 | Accounts | Created and linked by the project owner in Supabase (see [Account setup](#account-setup)). **Changed 13 November 2026:** the admin page's Add student and Add lecturer forms now also create a confirmed login with a temporary password and link it ([admin-created logins](admin-accounts.md)). |
 | 3 | Where login happens | In the backend; the session is kept in httpOnly cookies. No Supabase key or token reaches the browser. |
 | 4 | Page addresses | `/login`, `/student`, `/lecturer`, `/admin`. Old `#/student`, `#/lecturer`, `#main` links redirect. |
 | 5 | Account linked to several roles | admin > lecturer > student. |
 | 6 | Main menu | Removed. `/admin` is an empty placeholder; the admin area is built by another team member. |
 | 7 | Student and lecturer pages | Not changed. Only routing to them; the shell passes the logged-in student's code to the student page through its existing `studentCode` prop. |
 | 8 | Sign-up and forgot password | Out of scope. Public sign-up should be disabled in Supabase. |
+| 10 | Temporary passwords (13 November 2026) | An account created on the admin page must replace its temporary password at first login, at `/change-password`, before it can open any other page or API. See [Forced password change](#forced-password-change). |
 | 9 | Development pages | Moved under `/admin`, require an admin login, and keep the existing development-mode and localhost checks. |
 
 ## How it works
@@ -49,6 +50,7 @@ Later requests: cookie → FastAPI asks Supabase /auth/v1/user (cached 60 s) →
 | `/admin` | → `/login?next=/admin` | Admins only; others → own home |
 | `/admin/schedule` | → `/login?next=/admin/schedule` | Admins only; others → own home. Scheduling workspace opened from Admin > Timetable > Schedule Class (added 12 November 2026). Its generate/save calls need an admin login only (production since 12 November 2026) |
 | `/admin/development/scheduling-test-hayden` | → `/login?next=…` | Admins only (plus development mode and localhost) |
+| `/change-password` | → `/login` | Only while a temporary password is in use; others → own home. Meanwhile every page above sends the user here. |
 
 The backend applies these rules when a page is loaded directly; the Vue app repeats them for the Vite dev server and in-app navigation. If any API call returns 401 later (session expired), the app sends the user to `/login` and back afterwards. A thin bar above each page shows the user's name, role and a **Log out** button.
 
@@ -57,6 +59,8 @@ The backend applies these rules when a page is loaded directly; the Vue app repe
 | Endpoint | Access |
 | --- | --- |
 | `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me` | Public / logged in (`me` returns 401 when not logged in) |
+| `POST /api/auth/change-password` | Any logged-in user, including one with a temporary password |
+| Every other logged-in API | 403 `PASSWORD_CHANGE_REQUIRED` while a temporary password is in use |
 | `GET /api/health`, `GET /api/config`, `/docs`, `/openapi.json` | Public |
 | `GET /api/health/database`, `GET /api/rooms` | Any logged-in user |
 | `GET /api/student/{code}`, `…/timetable` | Students: their own code only (403 otherwise); admins: any |
@@ -68,11 +72,26 @@ The backend applies these rules when a page is loaded directly; the Vue app repe
 | `GET /api/admin/timetable/{id}/availability`, `POST …/reschedule` | Admins only (the `POST` also needs a same-site `Origin`) |
 | `/api/admin/*` (admin page) | Admins only: the login session, or a pasted Supabase token (since 12 November 2026). Timetable changes run in the database as that admin. |
 
-Errors: `401 AUTH_REQUIRED`, `403 FORBIDDEN_ROLE` / `ADMIN_REQUIRED`; login errors `INVALID_CREDENTIALS` (401), `ACCOUNT_NOT_LINKED` / `EMAIL_NOT_CONFIRMED` (403), `TOO_MANY_ATTEMPTS` (429), `AUTH_NOT_CONFIGURED` (503), `AUTH_UNAVAILABLE` (502), `AUTH_TIMEOUT` (504). The student endpoints keep their existing plain-text error style. Passwords and tokens are never returned in response bodies or logged.
+Errors: `401 AUTH_REQUIRED`, `403 FORBIDDEN_ROLE` / `ADMIN_REQUIRED`; login errors `INVALID_CREDENTIALS` (401), `ACCOUNT_NOT_LINKED` / `EMAIL_NOT_CONFIRMED` (403), `TOO_MANY_ATTEMPTS` (429), `AUTH_NOT_CONFIGURED` (503), `AUTH_UNAVAILABLE` (502), `AUTH_TIMEOUT` (504). The student endpoints keep their existing plain-text error style. Passwords and tokens are never logged or returned in response bodies, with one exception since 13 November 2026: the admin-only create routes return a new user's temporary password once, marked `no-store` ([admin-created logins](admin-accounts.md)).
+
+## Forced password change
+
+Added 13 November 2026 at the user's request: "When a new user logs into their interface require them to change their passwords."
+
+- **The flag.** The admin page creates each login with `app_metadata.must_change_password = true` ([admin-created logins](admin-accounts.md)). In Supabase, `app_metadata` can be changed only with the server key; users can edit only `user_metadata`, so they cannot clear the flag themselves.
+- **While it is set.** The session reports `must_change_password: true` and `home: "/change-password"`. Page loads go to `/change-password`, and every API except `me`, `logout` and `change-password` answers 403 `PASSWORD_CHANGE_REQUIRED`: through `require_roles`, the admin API's own check, and the scheduling tools. The student and lecturer page components are unchanged; the app shell shows the change page instead of them.
+- **`POST /api/auth/change-password`** with `{current_password, new_password}`:
+  1. `new_password`: 8 to 72 bytes (bcrypt's limit) and different from the current one. The project's own Supabase password rules apply on top.
+  2. The current password is checked by signing in again. That also gives a fresh session, so Supabase's "secure password change" never asks for reauthentication.
+  3. The new password is set as the user with `PUT /auth/v1/user` (Supabase `updateUser`, as in [Supabase's password guide](https://supabase.com/docs/guides/auth/passwords)). Supabase stores only its bcrypt hash.
+  4. The flag is cleared with the server key (`PUT /auth/v1/admin/users/{id}`, `app_metadata` is merged).
+  5. The cookies switch to the fresh session, and the old one is revoked on its own (`/auth/v1/logout?scope=local`). The reply is the updated session, with the role's home page.
+- **Errors:** `WRONG_PASSWORD` (400, not 401, so the page does not jump to the login), `SAME_PASSWORD` and `WEAK_PASSWORD` (422; a password found in a breach gets its own message), `PASSWORD_FLAG_NOT_CLEARED` (502: the password changed but the flag did not, so the user is asked again and enters the new password as the current one).
+- Accounts without the flag (all accounts made in the Supabase dashboard) are not affected. The endpoint also works for them, but no page links to it, because voluntary password change was not requested.
 
 ## Account setup
 
-The app does not create accounts. In the Supabase dashboard:
+New students (with a new student code) and new lecturers added on the admin page get a login automatically; see [admin-created logins](admin-accounts.md). For admins, and for students or lecturers that already exist, use the Supabase dashboard:
 
 1. **Authentication → Sign In / Providers:** keep Email enabled; turn **off** "Allow new users to sign up".
 2. **Authentication → Users → Add user:** enter the email and password and tick **Auto Confirm User** (unconfirmed accounts get `EMAIL_NOT_CONFIRMED`).

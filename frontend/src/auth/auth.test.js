@@ -17,8 +17,8 @@ function parse(url) {
   return { pathname: u.pathname, search: u.search, hash: u.hash }
 }
 
-const { ROLE_PAGES, landingFor, legacyHashTarget, navigate, path, safeNext } = await import('../router.js')
-const { AuthError, loadSession, login, logout, session } = await import('./session.js')
+const { PASSWORD_PAGE, ROLE_PAGES, landingFor, legacyHashTarget, navigate, path, safeNext } = await import('../router.js')
+const { AuthError, changePassword, loadSession, login, logout, passwordProblem, session } = await import('./session.js')
 
 const student = { role: 'student', home: '/student', name: 'Sam', code: 'TP000001' }
 const admin = { role: 'admin', home: '/admin', name: 'Ada' }
@@ -89,6 +89,35 @@ test('login sends credentials once and shows the server message on failure', asy
   await assert.rejects(login('x', 'y'), { message: 'Enter a valid email address and your password.' })
   globalThis.fetch = async () => { throw new TypeError('network') }
   await assert.rejects(login('a@b.c', 'pw'), { code: 'NETWORK' })
+})
+
+test('a user with a temporary password lands only on the change-password page', () => {
+  const flagged = { ...student, home: PASSWORD_PAGE, must_change_password: true }
+  assert.equal(landingFor(flagged, null), '/change-password')
+  assert.equal(landingFor(flagged, '/student'), '/change-password')
+})
+
+test('new password checks match the backend rules', () => {
+  assert.equal(passwordProblem('', 'long-enough', 'long-enough'), 'Enter your current password.')
+  assert.equal(passwordProblem('TP0000010042', 'short', 'short'), 'Use at least 8 characters.')
+  assert.equal(passwordProblem('TP0000010042', 'x'.repeat(73), 'x'.repeat(73)), 'Use at most 72 characters.')
+  assert.equal(passwordProblem('TP0000010042', 'é'.repeat(40), 'é'.repeat(40)), 'Use at most 72 characters.') // 80 bytes
+  assert.equal(passwordProblem('same-password', 'same-password', 'same-password'), 'Choose a password different from your current one.')
+  assert.equal(passwordProblem('TP0000010042', 'long-enough', 'long-enougH'), 'The new passwords do not match.')
+  assert.equal(passwordProblem('TP0000010042', 'long-enough', 'long-enough'), '')
+})
+
+test('changePassword sends both passwords once and updates the session', async () => {
+  const calls = fakeFetch(200, student)
+  session.value = { ...student, home: PASSWORD_PAGE, must_change_password: true }
+  assert.deepEqual(await changePassword('TP0000010042', 'long-enough'), student)
+  assert.equal(calls[0].url, '/api/auth/change-password')
+  assert.deepEqual(JSON.parse(calls[0].options.body), { current_password: 'TP0000010042', new_password: 'long-enough' })
+  assert.deepEqual(session.value, student)
+  fakeFetch(400, { detail: { code: 'WRONG_PASSWORD', message: 'Your current password is incorrect.' } })
+  await assert.rejects(changePassword('bad', 'long-enough'), { code: 'WRONG_PASSWORD', message: 'Your current password is incorrect.' })
+  fakeFetch(401, { detail: { code: 'AUTH_REQUIRED', message: 'Log in to continue.' } })
+  await assert.rejects(changePassword('x', 'long-enough'), { code: 'AUTH_REQUIRED' })
 })
 
 test('logout clears the local session even if the server call fails', async () => {

@@ -17,6 +17,7 @@
 - Roles come from `admins`, `lecturers` and `students` linked by `auth_user_id`; an account linked to several uses admin > lecturer > student. Unlinked accounts are refused.
 - Pages: `/student`, `/lecturer`, `/admin` (empty placeholder owned by another team member). Development pages live under `/admin/development/` and need an admin login.
 - Do not change the student or lecturer page components for login work; only route users to them. Sign-up and password reset are out of scope.
+- Accounts created on the admin page get a temporary password (their code + 4 random digits) and must change it at `/change-password` before using any other page or API (accepted 13 November 2026). The flag is Supabase `app_metadata.must_change_password`; see `docs/backend/login.md`.
 
 ## Accepted scheduling rules
 
