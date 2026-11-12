@@ -466,4 +466,4 @@ def create_lecturer_router(settings: SupabaseSettings) -> APIRouter:
 
         return {"status": "ok"}
 
-    return router
+    return router
