@@ -49,8 +49,9 @@ class SaveResult(BaseModel):
     status: Literal["SAVED"] = "SAVED"
     week_start: str
     timezone: str
-    scope: Literal["intake", "intake_group"]
-    intake_id: UUID
+    scope: Literal["intake", "intake_group", "intakes"]
+    intake_id: UUID | None = Field(description="The intake when exactly one was selected; null for several")
+    intake_ids: list[UUID] = Field(description="Every selected intake, sorted")
     group_number: int | None
     snapshot_revision: str
     saved_count: int

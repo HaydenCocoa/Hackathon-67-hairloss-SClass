@@ -24,6 +24,13 @@ The result satisfies compulsory scheduling rules against its captured input. Sin
 
 The date and intake ID are illustrative; replace the intake ID with an actual database UUID. Require an exact Monday date and an intake UUID; reject unrecognized request fields. `group_number` is optional: omit it or use null for all groups in that intake, or supply a positive integer to select one group. Strings, booleans, fractions, zero and negative group numbers are rejected. Interpret the week in the configured campus timezone. Fetch actual teaching requirements and availability from the database; the caller supplies no lecturer, student roster, duration, room inventory, or booking exclusions.
 
+**Several intakes (added 12 November 2026 for the admin `/admin/schedule` page).**
+- Instead of `intake_id`, send `"intake_ids": ["<uuid>", "<uuid>", …]` (1–100 IDs; repeats are ignored). The selected intakes' pending classes, all their groups, are scheduled **together** in one model, so they cannot clash with each other.
+- Exactly one of `intake_id` and `intake_ids` is required, and `group_number` is only allowed with `intake_id`. Anything else is a 422, sent before any database read.
+- A one-item `intake_ids` behaves exactly like `intake_id`, including the same `snapshot_revision`. Two or more intakes use a revision built from the sorted ID list.
+- `POST /api/schedules/save` accepts the same `intake_ids`. The whole multi-intake preview is saved in one insert, and it is stale under any other scope.
+- The development test page still sends `intake_id`.
+
 Use the server's configured solver budget, worker count, and seed initially. This keeps the first contract small and prevents callers from requesting unbounded computation. Client-selectable options can be added deliberately later.
 
 **Implemented scope:** jointly schedule only pending occurrences for the selected intake and optional group targeting that week. Already booked classes, reservations, and meetings from every intake/group remain fixed constraints with their complete student attendance sets. Cancelled occurrences stay excluded. Unscheduled demand outside the selected scope is not assigned or treated as a reservation; separate unsaved previews can overlap until trusted saving is implemented.
@@ -53,7 +60,8 @@ One request returns its result; there is no background-job queue or polling API.
 | `statistics` | Actual search options, elapsed/search time, and solver statistics |
 | `quality_optimized` | `true` when the configured preferences produced the returned timetable (since 12 November 2026) |
 | `quality` | Measurements of a complete timetable (idle minutes, longest day, seat use, auditorium classes); `null` otherwise. See [timetable quality](timetable-quality.md) |
-| `scope`, `intake_id`, `group_number` | `intake` or `intake_group`, selected intake UUID and optional group number |
+| `scope`, `intake_id`, `intake_ids`, `group_number` | `intake`, `intake_group` or `intakes` (several); the intake UUID when exactly one was selected (otherwise `null`); every selected intake, sorted; optional group number |
+| `unplaced` | Classes that cannot be placed in any room at any time, with course code/name/type, intake, group and readable reasons (built from `candidate_failures`; added 12 November 2026) |
 
 Placement instants retain the engine's UTC representation alongside the campus timezone for display. The raw snapshot, student UUID sets, server credentials, and provider error bodies are excluded. Course and room labels come from the existing snapshot, without extra provider calls. Lecturer and intake display names are not loaded; the page shows their IDs. Preview results, handled errors, and page assets use `Cache-Control: no-store`.
 

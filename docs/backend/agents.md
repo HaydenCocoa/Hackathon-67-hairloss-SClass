@@ -487,3 +487,82 @@ Historical discussion; superseded by the implementation record below after the u
   - what breaks without them.
 
   Also added the read-only status query [hosted-migrations-status.sql](hosted-migrations-status.sql). It was checked on local PostgreSQL (PGlite) before and after applying all five. Its first version wrongly reported `rescheduled` as applied on a fresh `schema.sql`, so it now also checks the trigger function. Nothing was run on hosted Supabase.
+
+## Admin room timetable and `/admin/schedule` page — 12 November 2026
+
+- Work done on branch `feature-admin-room-timetable`, created from `main` (after PR #17).
+- **Requirement:** this is the first step of moving the development scheduling page into the admin page.
+  - Admin > Timetable shows one room's classes for one week (Monday to Sunday) as a calendar, with the room picked from a drop-down. Saturday and Sunday are greyed.
+  - Below the calendar, a green **Schedule Class** button opens `/admin/schedule` in a new tab.
+  - For now that page only shows a dialog saying it is under development.
+  - White interface with Google colours.
+- **User decisions:**
+  - Only the Timetable tab was to be changed. The user approved touching `router.js`, `App.vue`, `backend/app/main.py` and the existing routing tests for the new page.
+  - The calendar **replaces** the Timetable tab's old date-range list. Its Edit (reschedule) and Remove (cancelled class) buttons are gone from the page. The `PUT` and `DELETE /api/admin/timetable/{id}` endpoints and their database functions are unchanged.
+- **Implemented:**
+  - `frontend/src/admin/RoomTimetable.vue` (calendar) and `roomCalendar.js` (pure helpers).
+  - Calendar data:
+    - It uses the existing `GET /api/admin/timetable/rooms` and `GET /api/admin/timetable` for the whole campus week (Monday 00:00 to Monday 00:00, `+08:00`), filtered by the selected room in the browser.
+    - Times are shown in `Asia/Kuala_Lumpur`.
+    - Overlapping classes sit side by side. Cancelled classes are grey and struck through; rescheduled classes show "Moved".
+    - The hour range is 8 AM–7 PM and grows for earlier or later bookings.
+    - Demo mode uses the page's demo data.
+  - `AdminPage.vue`: the Timetable tab renders the calendar. The old list, its state and its edit/remove functions were removed.
+  - `SchedulePage.vue`: placeholder dialog.
+  - `router.js` and `App.vue`: `/admin/schedule` is an admin page.
+  - `main.py`: serves `/admin/schedule` with the same login and role redirects as `/admin`.
+- **No API or database change.** Meetings are not shown, because the admin timetable API returns classes only.
+- **Verification:**
+  - New `roomCalendar.test.js`: 7 tests pass (weeks, weekend, campus time zone, room filter, hour range, overlap lanes, labels).
+  - Login/routing 7/7 and lecturer 12/12 frontend tests pass; `npm run build` succeeds.
+  - Backend `test_auth.py` and `test_app.py`: 42 passed, 1 skipped, including new `/admin/schedule` page and redirect checks.
+  - Visual check in headless Edge against a temporary local server with synthetic data and a fake admin session (no Supabase), at 1280 px and 390 px. On a phone the calendar scrolls sideways inside its card, and the page itself does not. Not checked against hosted Supabase.
+
+## `/admin/schedule` scheduling workspace and multi-intake API — 12 November 2026
+
+- Work done on branch `feature-admin-room-timetable`, continuing the previous entry.
+- **Requirement:** move the development scheduling page's features into `/admin/schedule`, using intake names instead of typed UUIDs.
+  - A left panel and a right panel, with an adjustable width.
+  - The left panel lists the database's intakes with checkboxes.
+  - A green **Generate Preview** button at the top right. After a preview it becomes **Regenerate Preview**, and a blue **Schedule with preview** button appears to its right.
+  - The right panel turns the API response into a readable preview.
+  - Saving needs a double confirmation that says it cannot be undone and is published to everyone.
+- **Decision (user, 12 November 2026):** extend the API rather than send one request per intake. Separate per-intake previews could double-book a shared lecturer, room or student, and the second save would be refused as stale.
+- **Backend:**
+  - `preview.py`: `GenerationRequest` accepts `intake_ids` (1–100) as an alternative to `intake_id`; exactly one must be given, and `group_number` is only allowed with `intake_id`.
+  - `select_scope` filters by a set of intakes. One intake keeps the original revision; several use a version-2 revision over the sorted IDs.
+  - Responses add `intake_ids`, `scope = "intakes"` and a nullable `intake_id`, plus a new `unplaced` list naming classes that cannot be placed (course, intake, group, reasons).
+  - `save.py`: `SaveResult` adds `intake_ids`.
+  - The development test page is unchanged and still works. Contract: [preview API](schedule-preview-api.md).
+- **Frontend** (`frontend/src/admin/`):
+  - `SchedulePage.vue`: page, actions, generate/confirm flow, and a resizable split. The divider can be dragged, moved with the arrow keys (Home/End), or reset by double-click; its width is remembered in `localStorage`. Panels stack on narrow screens.
+  - `IntakePanel.vue`: week navigation, a date jump, search, Select all/Clear, and intake checkboxes.
+  - `PreviewPanel.vue`:
+    - the outcome in plain language, plus summary figures;
+    - "Show" by intake, room or lecturer;
+    - calendar and list views;
+    - the unplaced classes and their reasons, or the diagnostics;
+    - generating progress with a timer, and an outdated-selection warning.
+  - `ScheduleConfirmDialog.vue`: summary, the irreversible/published-to-everyone warning, a required tick box, then **Confirm and schedule**.
+  - `scheduleApi.js` (fetch and errors, 401 → login) and `schedulePreview.js` (pure helpers).
+  - `WeekGrid.vue`: the Monday–Sunday grid, now shared with the room timetable (which was refactored to use it).
+- **Behaviour:**
+  - **Schedule with preview** is disabled while the week or intake selection differs from the preview, for an incomplete preview, or after a failed save other than "busy".
+  - After saving, the page shows "Scheduled: N classes are now live" and offers **Generate Preview** again.
+  - Leaving with an unsaved complete preview asks the browser for confirmation.
+  - Previews are still not stored.
+  - Generation can take about two minutes.
+  - On Vercel the scheduling API is blocked (development-only), and the page shows that advice.
+- **Verification:**
+  - Backend preview/save tests: 82 passed and 2 failed. The 2 failures are the known older preview tests; new tests cover multi-intake joint scheduling, labelled unplaced classes, validation and a multi-intake save.
+  - Full backend suite: 347 passed, 10 failed, 1 skipped. These are the same 10 older loader/preview failures as before this work.
+  - Frontend: `schedulePreview.test.js` 8/8, `roomCalendar.test.js` 7/7, login 7/7, lecturer 12/12; `npm run build` succeeds.
+  - The development page's tests: 20/20, including the two served-page tests against the synthetic QA service.
+  - Walkthrough in headless Edge against the real backend and solver on synthetic data (temporary scratchpad QA server with extra synthetic intakes; no Supabase):
+    - three intakes, 7 of 7 classes placed (`OPTIMAL`, about 45 s);
+    - button changes, the outdated warning and the double confirmation;
+    - a save;
+    - divider drag and keyboard;
+    - 1440 px and 390 px widths.
+  - The first walkthrough found that quick successive checkbox clicks were lost (the panel updated from a stale copy). Fixed: the page now owns the selection, and the panel sends toggle/add/clear events.
+  - Not checked against hosted Supabase.

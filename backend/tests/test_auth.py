@@ -240,7 +240,7 @@ def test_logout_revokes_and_clears_the_session(supabase, frontend):
 def test_pages_redirect_to_login_and_to_the_users_own_area(supabase, frontend):
     settings, _ = supabase
     with client(settings, frontend) as c:
-        for path in ("/student", "/lecturer", "/admin"):
+        for path in ("/student", "/lecturer", "/admin", "/admin/schedule"):
             response = c.get(path)
             assert response.status_code == 303 and response.headers["location"] == f"/login?next={path}"
         assert c.get("/").headers["location"] == "/login"
@@ -250,6 +250,7 @@ def test_pages_redirect_to_login_and_to_the_users_own_area(supabase, frontend):
         assert c.get("/student").status_code == 200
         assert c.get("/lecturer").headers["location"] == "/student"
         assert c.get("/admin").headers["location"] == "/student"
+        assert c.get("/admin/schedule").headers["location"] == "/student"
         assert c.get("/login").headers["location"] == "/student"
         for unsafe in ("//evil.example", "https://evil.example", "/admin", "/api/auth/me", "/\\evil"):
             assert c.get("/login", params={"next": unsafe}).headers["location"] == "/student"
@@ -420,3 +421,6 @@ def test_dependency_override_is_available_for_other_tests(frontend):
     with TestClient(app, base_url=BASE, follow_redirects=False) as c:
         assert c.get("/api/auth/me").json()["role"] == "admin"
         assert c.get("/").headers["location"] == "/admin"
+        # The scheduling workspace opened from Admin > Timetable > Schedule Class.
+        assert c.get("/admin/schedule").status_code == 200
+        assert c.get("/login", params={"next": "/admin/schedule"}).headers["location"] == "/admin/schedule"

@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue'
+import RoomTimetable from './RoomTimetable.vue'
 
 const token = ref('')
 const demo = ref(false)
@@ -17,12 +18,7 @@ const memory = { courses: [{ id: '1', course_code: 'CS101', name: 'Introduction 
   { id: 'demo-cancelled', course_code: 'CS102', course_name: 'Cancelled class', starts_at: demoStart.toISOString(), ends_at: demoEnd.toISOString(), room_id: 'demo-room', room: demoRooms[0], lecturer: { full_name: 'Demo Lecturer' }, intake: { intake_code: 'DEMO' }, group_number: 1, status: 'cancelled' },
 ] }
 const fields = computed(() => ({ courses: ['course_code', 'name', 'course_type'], students: ['student_code', 'full_name', 'age'], lecturers: ['lecturer_code', 'full_name'], intakes: ['intake_code', 'max_group'], timetable: [] })[section.value])
-const startDate = ref(new Date().toISOString().slice(0, 10))
-const endDate = ref(new Date().toISOString().slice(0, 10))
-const rooms = ref([])
-const editingSession = ref(null)
-const sessionForm = ref({})
-const savingSession = ref(false)
+const timetableRefresh = ref(0) // asks the room calendar to reload (Connect, demo, opening the tab)
 function intakeCodes(row) {
   return [...new Set((row.course_offerings || []).map(offering => offering.intakes?.intake_code).filter(Boolean))].sort().join(' · ') || 'No intake linked'
 }
@@ -36,76 +32,12 @@ async function request(method, id, body) {
 async function load() {
   message.value = ''
   try {
-    if (demo.value) {
-      rows.value = [...memory[section.value]]
-      if (section.value === 'timetable') rooms.value = demoRooms
-    }
-    else if (section.value === 'timetable') {
-      const start = new Date(`${startDate.value}T00:00:00`)
-      const end = new Date(`${endDate.value}T00:00:00`)
-      end.setDate(end.getDate() + 1)
-      if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || end <= start) throw new Error('Choose a valid date range.')
-      const params = new URLSearchParams({ start: start.toISOString(), end: end.toISOString() })
-      const headers = { Authorization: `Bearer ${token.value}` }
-      const [response, roomResponse] = await Promise.all([
-        fetch(`/api/admin/timetable?${params}`, { headers }),
-        fetch('/api/admin/timetable/rooms', { headers }),
-      ])
-      const [result, roomResult] = await Promise.all([response.json(), roomResponse.json()])
-      if (!response.ok) throw new Error(result.detail || 'Request failed.')
-      if (!roomResponse.ok) throw new Error(roomResult.detail || 'Could not load rooms.')
-      rows.value = result
-      rooms.value = roomResult
-    } else rows.value = await request('GET')
+    if (section.value === 'timetable') { rows.value = []; timetableRefresh.value++ }
+    else if (demo.value) rows.value = [...memory[section.value]]
+    else rows.value = await request('GET')
   } catch (e) { rows.value = []; message.value = e.message }
 }
-function select(value) { section.value = value; editingSession.value = null; reset(); load() }
-function editSession(row) {
-  editingSession.value = row
-  const date = new Date(row.starts_at)
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
-  sessionForm.value = { starts_at: local.toISOString().slice(0, 16), room_id: row.room_id, reason: '' }
-  message.value = ''
-}
-async function saveSession() {
-  const row = editingSession.value
-  const start = new Date(sessionForm.value.starts_at)
-  if (!row || !Number.isFinite(start.getTime()) || !sessionForm.value.room_id || !sessionForm.value.reason.trim()) {
-    message.value = 'Choose a start time and room, and enter a reason.'
-    return
-  }
-  savingSession.value = true
-  try {
-    if (demo.value) {
-      const duration = new Date(row.ends_at) - new Date(row.starts_at)
-      Object.assign(row, { starts_at: start.toISOString(), ends_at: new Date(start.getTime() + duration).toISOString(), room_id: sessionForm.value.room_id, room: demoRooms.find(room => room.id === sessionForm.value.room_id) })
-    } else {
-      const response = await fetch(`/api/admin/timetable/${row.id}`, {
-        method: 'PUT', headers: { Authorization: `Bearer ${token.value}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ expected_start: row.starts_at, expected_room: row.room_id, new_start: start.toISOString(), new_room: sessionForm.value.room_id, reason: sessionForm.value.reason.trim() }),
-      })
-      const result = await response.json()
-      if (!response.ok) throw new Error(result.detail || 'Could not update the class.')
-    }
-    editingSession.value = null
-    await load()
-    message.value = 'Class updated successfully.'
-  } catch (e) { message.value = e.message }
-  finally { savingSession.value = false }
-}
-async function removeCancelled(row) {
-  if (!window.confirm('Remove this cancelled class from the timetable? Its history will be retained.')) return
-  try {
-    if (demo.value) memory.timetable = memory.timetable.filter(item => item.id !== row.id)
-    else {
-      const response = await fetch(`/api/admin/timetable/${row.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token.value}` } })
-      const result = await response.json()
-      if (!response.ok) throw new Error(result.detail || 'Could not remove the class.')
-    }
-    await load()
-    message.value = 'Cancelled class removed from the timetable.'
-  } catch (e) { message.value = e.message }
-}
+function select(value) { section.value = value; reset(); load() }
 async function save() {
   message.value = ''
   const payload = Object.fromEntries(fields.value.map(key => [key, form.value[key] ?? '']))
@@ -148,17 +80,7 @@ reset()
     <nav><button v-for="item in ['courses', 'students', 'lecturers', 'intakes', 'timetable']" :key="item" :class="{ active: section === item }" @click="select(item)">{{ item }}</button></nav>
     <p role="status" class="notice">{{ message }}</p>
     <section v-if="section === 'timetable'" class="panel">
-      <h2>University timetable</h2>
-      <div class="access"><label>Start date<input v-model="startDate" type="date" /></label><label>End date<input v-model="endDate" type="date" /></label><button @click="load">Load classes</button></div>
-      <form v-if="editingSession" class="access" @submit.prevent="saveSession">
-        <strong>Reschedule {{ editingSession.course_name }}</strong>
-        <label>Start time<input v-model="sessionForm.starts_at" type="datetime-local" required /></label>
-        <label>Room<select v-model="sessionForm.room_id" required><option v-for="room in rooms" :key="room.id" :value="room.id">{{ room.name }} · {{ room.building }} · {{ room.room_type }} · {{ room.capacity }} seats</option></select></label>
-        <label>Reason<input v-model="sessionForm.reason" maxlength="500" required /></label>
-        <button type="submit" :disabled="savingSession">Save changes</button><button type="button" @click="editingSession = null">Cancel</button>
-      </form>
-      <p v-if="!rows.length">No scheduled classes in this period.</p>
-      <div v-for="row in rows" :key="row.id" class="record"><div><strong>{{ row.course_name }} · {{ row.course_code }}</strong><p>{{ new Date(row.starts_at).toLocaleString() }} – {{ new Date(row.ends_at).toLocaleString() }}</p><p>{{ row.intake?.intake_code }} · Group {{ row.group_number }} · {{ row.lecturer?.full_name || '—' }} · {{ row.room?.name || '—' }} · {{ row.status }}</p></div><div><button v-if="row.status === 'scheduled' || row.status === 'rescheduled'" @click="editSession(row)">Edit</button><button v-if="row.status === 'cancelled'" @click="removeCancelled(row)">Remove</button></div></div>
+      <RoomTimetable :token="token" :demo="demo" :demo-rooms="demoRooms" :demo-sessions="memory.timetable" :refresh="timetableRefresh" />
     </section>
     <div v-else class="admin-grid"><section class="panel"><h2>{{ editing ? 'Edit' : 'Add' }} {{ section.slice(0, -1) }}</h2><form @submit.prevent="save">
       <label v-for="field in fields" :key="field">{{ field.replaceAll('_', ' ') }}<select v-if="field === 'course_type'" v-model="form[field]"><option v-for="type in ['lecture', 'tutorial', 'lab', 'others']" :key="type">{{ type }}</option></select><input v-else v-model="form[field]" :type="['age', 'max_group'].includes(field) ? 'number' : 'text'" :min="field === 'age' ? 0 : 1" :required="field !== 'age'" /></label>

@@ -83,6 +83,29 @@ def test_selected_group_save_keeps_scope(provider):
         assert len(state["writes"]) == 1
 
 
+def test_several_intakes_save_together_in_one_insert(provider):
+    from backend.tests.test_schedule_preview import add_lesson
+    settings, state = provider
+    add_lesson(state, 800, uid(3))
+    multi = {"week_start": WEEK["week_start"], "intake_ids": [uid(1), uid(3)]}
+    with client_for(settings) as client:
+        data = generate(client, multi)
+        body = {**save_body(data), "intake_ids": data["intake_ids"]}
+        # The same classes saved under a single intake's scope are refused (different revision).
+        single = client.post(SAVE, json={**save_body(data), "intake_id": uid(1)})
+        assert single.status_code == 409 and detail(single)["code"] == "PREVIEW_STALE" and not state["writes"]
+        response = client.post(SAVE, json=body)
+        assert response.status_code == 201, response.text
+        saved = response.json()
+        assert saved["scope"] == "intakes" and saved["intake_id"] is None and saved["intake_ids"] == [uid(1), uid(3)]
+        assert saved["saved_count"] == 2 and len(state["writes"]) == 1 and len(state["writes"][0]["rows"]) == 2
+        assert generate_status(client, multi) == "NO_PENDING_REQUIREMENTS"
+
+
+def generate_status(client, body):
+    return client.post("/api/schedules/generate", json=body).json()["status"]
+
+
 def test_preview_is_stale_when_the_week_changes_or_scope_differs(provider):
     settings, state = provider
     with client_for(settings) as client:

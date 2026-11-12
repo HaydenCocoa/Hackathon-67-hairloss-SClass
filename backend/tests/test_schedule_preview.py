@@ -136,6 +136,65 @@ def test_selected_group_excludes_other_pending_demand_but_all_intake_groups_are_
         assert len({selected["snapshot_revision"], all_groups["snapshot_revision"], other["snapshot_revision"]}) == 3
 
 
+def add_lesson(state, number, intake_id, group=1, **changes):
+    """Another pending class like the fixture's, for another intake/group (same lecturer and course)."""
+    source = next(row for row in state["payload"]["requirements"] if row["needs_scheduling"])
+    lesson = {**source, "occurrence_id": uid(number), "section_id": uid(number + 1), "plan_id": uid(number + 2),
+              "intake_id": intake_id, "group_number": group, **changes}
+    state["payload"]["requirements"].append(lesson)
+    state["payload"]["rosters"].append({"section_id": lesson["section_id"], "intake_id": intake_id,
+                                        "group_number": group, "student_ids": [uid(10)]})
+    return lesson
+
+
+def test_several_intakes_are_scheduled_together_without_clashes(provider):
+    from datetime import datetime, timedelta
+    settings, state = provider
+    add_lesson(state, 800, uid(3))  # same lecturer as intake 1's pending class
+    multi = {"week_start": WEEK["week_start"], "intake_ids": [uid(3), uid(1), uid(1)]}
+    with client_for(settings) as client:
+        data = client.post("/api/schedules/generate", json=multi).json()
+        assert data["has_solution"] and data["required_count"] == len(data["placements"]) == 2
+        assert data["scope"] == "intakes" and data["intake_id"] is None and data["group_number"] is None
+        assert data["intake_ids"] == [uid(1), uid(3)]  # sorted, repeats removed
+        assert {p["intake_id"] for p in data["placements"]} == {uid(1), uid(3)} and data["unplaced"] == []
+        first, second = sorted(data["placements"], key=lambda p: p["starts_at"])
+        gap = timedelta(minutes=settings.scheduling.min_gap_minutes)
+        # Scheduled together: the shared lecturer is never double-booked (and keeps the gap).
+        assert datetime.fromisoformat(second["starts_at"]) >= datetime.fromisoformat(first["ends_at"]) + gap
+        # One intake given as a list is exactly the single-intake request.
+        as_list = client.post("/api/schedules/generate", json={"week_start": WEEK["week_start"], "intake_ids": [uid(1)]}).json()
+        single = client.post("/api/schedules/generate", json=WEEK).json()
+        assert as_list["scope"] == "intake" and as_list["intake_id"] == uid(1) and as_list["intake_ids"] == [uid(1)]
+        assert as_list["snapshot_revision"] == single["snapshot_revision"] != data["snapshot_revision"]
+
+
+def test_unplaceable_classes_are_named_for_people(provider):
+    settings, state = provider
+    lesson = add_lesson(state, 900, uid(3), duration_minutes=6000)
+    with client_for(settings) as client:
+        data = client.post("/api/schedules/generate",
+                           json={"week_start": WEEK["week_start"], "intake_ids": [uid(1), uid(3)]}).json()
+    assert data["status"] == "INFEASIBLE" and not data["has_solution"] and data["placements"] == []
+    [unplaced] = data["unplaced"]
+    assert unplaced["occurrence_id"] == lesson["occurrence_id"] and unplaced["intake_id"] == uid(3)
+    assert unplaced["course_code"] == lesson["course_code"] and unplaced["group_number"] == 1
+    assert unplaced["reasons"] and all(isinstance(reason, str) and reason for reason in unplaced["reasons"])
+
+
+@pytest.mark.parametrize("scope", [
+    {"intake_id": uid(1), "intake_ids": [uid(1)]},  # both
+    {"intake_ids": []}, {"intake_ids": ["not-a-uuid"]}, {"intake_ids": uid(1)},
+    {"intake_ids": [uid(1)], "group_number": 1},  # groups only with a single intake_id
+    {"intake_ids": [uid(n) for n in range(1, 102)]},  # more than MAX_INTAKES
+])
+def test_invalid_intake_selection_does_not_load_database(provider, scope):
+    settings, state = provider
+    with client_for(settings) as client:
+        assert client.post("/api/schedules/generate", json={"week_start": WEEK["week_start"], **scope}).status_code == 422
+    assert not state["calls"]
+
+
 def test_scoped_projection_keeps_cross_intake_students_and_all_fixed_bookings(provider):
     from datetime import datetime
     from backend.tests.test_scheduling_loader import read

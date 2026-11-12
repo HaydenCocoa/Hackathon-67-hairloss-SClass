@@ -1,7 +1,8 @@
-// Minimal path router (no extra dependency): /login, /student, /lecturer, /admin.
+// Minimal path router (no extra dependency): /login, /student, /lecturer, /admin, /admin/schedule.
 import { ref } from 'vue'
 
-export const ROLE_PAGES = { '/student': 'student', '/lecturer': 'lecturer', '/admin': 'admin' }
+// Page path -> the role allowed to open it.
+export const ROLE_PAGES = { '/student': 'student', '/lecturer': 'lecturer', '/admin': 'admin', '/admin/schedule': 'admin' }
 
 export const path = ref(window.location.pathname)
 
