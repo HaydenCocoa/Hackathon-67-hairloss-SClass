@@ -58,16 +58,17 @@ def test_generates_complete_verified_draft_without_mutating_snapshot(snapshot):
         assignment.room_id = uid(999)
 
 
-def test_exact_fit_keeps_fractional_second_boundaries_without_rounding(snapshot):
+def test_exact_fit_uses_whole_minute_starts(snapshot):
     first = snapshot.opening_windows[0]
-    start = first.starts_at + timedelta(microseconds=123456)
-    window = first.model_copy(update={"starts_at": start, "ends_at": start + timedelta(minutes=90)})
-    snapshot = snapshot.model_copy(update={"opening_windows": (window,)})
-    result = solve_weekly_schedule(snapshot)
+    window = first.model_copy(update={"ends_at": first.starts_at + timedelta(minutes=90)})
+    result = solve_weekly_schedule(snapshot.model_copy(update={"opening_windows": (window,)}))
     assert result.has_solution
-    assert result.placements[0].starts_at == start
-    assert result.placements[0].ends_at == window.ends_at
-    assert result.placements[0].starts_at.microsecond == 123456
+    assert (result.placements[0].starts_at, result.placements[0].ends_at) == (window.starts_at, window.ends_at)
+    # A window opening part-way through a minute leaves no whole-minute start for an exact fit.
+    start = first.starts_at + timedelta(microseconds=123456)
+    shifted = first.model_copy(update={"starts_at": start, "ends_at": start + timedelta(minutes=90)})
+    result = solve_weekly_schedule(snapshot.model_copy(update={"opening_windows": (shifted,)}))
+    assert result.status == "INFEASIBLE" and result.diagnostics[0].code == "NO_CANDIDATES"
 
 
 @pytest.mark.parametrize("shared", ["lecturer", "student", "room"])

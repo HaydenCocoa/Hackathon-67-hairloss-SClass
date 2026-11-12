@@ -167,15 +167,15 @@ Individually valid candidates can still conflict with one another. The solver mu
 
 ## 8. Add timetable quality objectives
 
-**Status:** postponed by the user on 10 November 2026. Reviewed on 12 November 2026: nothing implemented yet. A plan with open decisions is in [timetable quality plan](docs/backend/timetable-quality-plan.md). These objectives remain future work, not completed requirements.
+**Status:** postponed on 10 November 2026; implemented and verified locally on 12 November 2026 with the user's decisions. See [timetable quality](docs/backend/timetable-quality.md). Not run against hosted Supabase.
 
-- [ ] Measure idle minutes between each student's first and last class per day; no mandatory breaks apply.
-- [ ] Make reducing total student waiting time the first optimization objective.
-- [ ] Add lecturer gap reduction as a lower-priority objective.
-- [ ] Add room utilization as a further preference.
-- [ ] Keep preference priorities configurable.
-- [ ] Keep all compulsory rules mandatory regardless of preference scores.
-- [ ] Return quality measurements alongside the generated timetable.
+- [x] Measure idle minutes between each student's first and last class per day. No mandatory breaks apply, but a compulsory 15-minute gap between bookings sharing a room, lecturer or student was added on 12 November 2026.
+- [x] Make reducing total student waiting time the first optimization objective (weight 100).
+- [x] Add lecturer gap reduction as a lower-priority objective (weight 10).
+- [x] Add room utilization as a further preference: fewer empty seats (weight 1); auditoriums only when no other permitted room can seat the class (compulsory).
+- [x] Keep preference priorities configurable (`scheduling.quality` in `Config/config.json`).
+- [x] Keep all compulsory rules mandatory regardless of preference scores (validator post-check on every result).
+- [x] Return quality measurements alongside the generated timetable (`quality`).
 
 Initial preference order:
 

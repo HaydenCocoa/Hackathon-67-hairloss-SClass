@@ -55,7 +55,7 @@ No database schema or hosted data was changed for step 1. No frontend change was
 | 5 | Explainable room, lecturer, student, and reservation conflict validation | Complete and verified locally; no new migration |
 | 6 | Feasible start ranges and suitable rooms without preset teaching slots | Complete and verified locally; no new migration |
 | 7 | CP-SAT generation satisfying all mandatory constraints and reporting accurate solver status | Complete and verified locally; no new migration |
-| 8 | Configurable objectives for student gaps, lecturer gaps, and room utilization | Not implemented. Reviewed and planned 12 Nov ([plan](timetable-quality-plan.md)); awaiting decisions |
+| 8 | Configurable objectives for student gaps, lecturer gaps, and room utilization | Implemented and verified locally 12 Nov ([timetable quality](timetable-quality.md)), with the compulsory 15-minute gap, whole-minute starts and auditorium rule |
 | 9 | Selected-intake/group preview API and test page including assignments, diagnostics, and scope-bound input revision; quality deferred | Complete and verified locally; direct localhost/development access only |
 | 10 | Authorized, transactional commits with revalidation, concurrency control, audit, and retry protection | Save implemented and verified locally on 11 Nov (recheck-then-single-insert). Admin login required since 12 Nov ([login](login.md)); save audit implemented 12 Nov ([save audit](save-audit.md)). Not run against hosted Supabase |
 | 11 | Safe rescheduling, cancellation, and fixed future reservations | Planned. `rescheduled` booking status added 12 Nov ([details](rescheduled-status.md)); hosted SQL run pending |
@@ -329,7 +329,19 @@ Historical discussion; superseded by the implementation record below after the u
 
 - The user asked to check step 8 (quality optimization), confirm what is done, and plan the work. Review result: none of step 8 is implemented. The solver has no objective; the preview returns `quality_optimized: false`, `quality: null`.
 - The solver tests that step 8 would extend currently error because of the stale `required_room_type` fixture.
-- Plan, risks and open decisions Q1–Q8: [timetable quality plan](timetable-quality-plan.md). Nothing implemented; awaiting the user's decisions.
+- Plan, risks and open decisions Q1–Q8 were written the same day; the plan has since been replaced by the implementation record [timetable quality](timetable-quality.md).
+
+## Step 8 implementation — 12 November 2026
+
+- Work done on branch `backend-enhancement` (Q8).
+- **Decisions:** Q1 whole-minute starts (changes the accepted "any time" rule); Q2 weighted sum 100/10/1; Q3 auditoriums only when no other permitted room can seat the class (compulsory) plus fewer empty seats (preference); Q4 report the longest day only; Q5 10 s; Q6 config only; Q7 fix fixtures first.
+- **New requirement from the user:** a 15-minute gap between scheduled classes. Implemented as compulsory for any two bookings sharing a room, lecturer or student, including meetings (interpretation recorded for confirmation).
+- **Implemented:** the rules in the shared validator, candidates and solver; a two-phase search with the weighted objective; `quality` measurements in every complete result; the page shows them. Details, example and risks: [timetable quality](timetable-quality.md).
+- **Verification:** 37 new tests; full backend suite 335 passed with the same 10 pre-existing failures and 0 errors (previously 97 errors from the stale fixture, now fixed); 20/20 page tests including the served QA run; not run on hosted Supabase.
+- **Follow-ups:**
+  - Confirm the two interpretations (gap scope, capacity-based auditorium rule).
+  - Decide whether to add a "fewer days on campus" preference.
+  - Check preview time on hosting.
 
 ## `rescheduled` class-session status — 12 November 2026
 

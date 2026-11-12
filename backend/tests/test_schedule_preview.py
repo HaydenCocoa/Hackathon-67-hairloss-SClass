@@ -58,7 +58,9 @@ def test_real_http_snapshot_to_solver_preview_is_complete_private_and_read_only(
         assert data["scope"] == "intake"
         assert data["intake_id"] == uid(1) and data["group_number"] is None
         assert len(data["placements"]) == data["required_count"] == 1
-        assert data["quality_optimized"] is False and data["quality"] is None
+        # Step 8: the configured preferences rank the timetable and it is measured.
+        assert data["quality_optimized"] is True and data["statistics"]["optimization_ran"] is True
+        assert data["quality"]["student_days"] >= 1 and data["quality"]["seat_use_percent"] > 0
         assert len(data["snapshot_revision"]) == 64
         placement = data["placements"][0]
         lesson = next(item for item in before["requirements"] if item["needs_scheduling"])

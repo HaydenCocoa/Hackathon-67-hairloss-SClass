@@ -22,9 +22,11 @@
 
 - Teaching weekdays and opening hours are defined in `Config/config.json`.
 - Initial hours are Monday–Friday, 08:30–18:00, in `Asia/Kuala_Lumpur`.
-- Classes can start at any time if the full duration fits within opening hours. Do not introduce a fixed start-time grid, mandatory break, or travel-time restriction without a new requirement.
+- Classes can start at any whole minute (accepted 12 November 2026) if the full duration fits within opening hours. Do not introduce a coarser start-time grid without a new requirement.
+- Two bookings that share a room, lecturer or student must be at least `min_gap_minutes` apart (15 minutes, accepted 12 November 2026). Do not add other mandatory breaks or travel-time rules without a new requirement.
 - Calendar eligibility alone does not establish lecturer, student, or room availability; those checks belong to later booking validation.
 - Teaching requirements repeat weekly over a database-defined period. Each lecture/lab section has a plan with a Monday start week, number of weeks, and occurrences per week. Preserve occurrence identity and original week when cancelling or moving it.
 - Step 3 uses the existing database dataset, confirmed ready by the user. Meeting and deliberately infeasible dataset fixtures are deferred for the initial MVP; do not add them as completion blockers or invent new hosted sample records.
-- The confirmed room policy is configurable: lectures use classrooms/auditoriums; tutorials and labs use classrooms/labs. Missing or empty mappings (initially `others`) reject placement. Use snapshot room rules, not the removed legacy section field.
+- The confirmed room policy is configurable: lectures use classrooms/auditoriums; tutorials and labs use classrooms/labs. Auditoriums (`reserved_room_types`) are used only when no other active, permitted room has enough seats (accepted 12 November 2026). Missing or empty mappings (initially `others`) reject placement. Use snapshot room rules, not the removed legacy section field.
+- Step 8 preferences (student idle 100, lecturer idle 10, room fit 1) only rank valid timetables; compulsory rules always win. Configure them in `scheduling.quality`.
 - Step 9 preview generation requires a selected intake UUID and optionally a group number; omission of the group means all groups in that intake. Preserve all existing class/meeting/reservation bookings and cross-intake student conflicts. Keep the API/test page local-development only. Since 12 November 2026 it also requires an admin login and lives under `/admin/development/`.

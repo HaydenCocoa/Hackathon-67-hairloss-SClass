@@ -71,12 +71,45 @@ class SolverSettings(SettingsModel):
     random_seed: int = Field(default=0, ge=0, le=2147483647, strict=True)
 
 
+ObjectiveName = Literal["student_idle", "lecturer_idle", "room_fit"]
+
+
+class QualityObjective(SettingsModel):
+    name: ObjectiveName
+    weight: int = Field(ge=0, le=1000, strict=True)
+
+
+class QualitySettings(SettingsModel):
+    """Step 8 preferences. They only rank valid timetables; compulsory rules never bend."""
+    enabled: bool = Field(default=False, strict=True)
+    objectives: list[QualityObjective] = Field(default_factory=list)
+
+    @field_validator("objectives")
+    @classmethod
+    def unique_names(cls, value: list[QualityObjective]) -> list[QualityObjective]:
+        if len({item.name for item in value}) != len(value):
+            raise ValueError("Each quality objective may appear only once")
+        return value
+
+    def weight(self, name: ObjectiveName) -> int:
+        return next((item.weight for item in self.objectives if item.name == name), 0)
+
+    @property
+    def active(self) -> bool:
+        return self.enabled and any(item.weight > 0 for item in self.objectives)
+
+
 class SchedulingSettings(SettingsModel):
     timezone: str = Field(min_length=1)
     opening_hours: dict[Weekday, OpeningHours] = Field(min_length=1)
     closed_dates: list[date] = Field(default_factory=list)
     room_compatibility: dict[CourseType, tuple[RoomType, ...]] = Field(default_factory=dict)
+    # Compulsory: minutes that must separate two bookings sharing a room, lecturer or student.
+    min_gap_minutes: int = Field(default=0, ge=0, le=240, strict=True)
+    # Compulsory: these room types are used only when no other permitted room type has enough seats.
+    reserved_room_types: tuple[RoomType, ...] = ()
     solver: SolverSettings = Field(default_factory=SolverSettings)
+    quality: QualitySettings = Field(default_factory=QualitySettings)
 
     @field_validator("timezone")
     @classmethod

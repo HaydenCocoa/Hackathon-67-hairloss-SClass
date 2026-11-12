@@ -229,7 +229,9 @@ def test_real_postgresql_output_becomes_complete_engine_input_over_http(provider
     candidates = generate_candidates(snapshot, lesson.occurrence_id)
     room_ranges = [item for item in candidates.ranges if item.room_id == UUID(int=60)]
     assert len(room_ranges) == 5
-    assert room_ranges[0].latest_start.isoformat() == "2026-11-09T05:13:00+00:00"
+    # 15 minutes earlier than before 12 November 2026: the loader now captures the compulsory gap from config.
+    assert snapshot.min_gap_minutes == 15 and snapshot.reserved_room_types == {"auditorium"}
+    assert room_ranges[0].latest_start.isoformat() == "2026-11-09T04:58:00+00:00"
     assert any(item.contains(valid.starts_at) for item in room_ranges)
     assert not any(item.contains(blocked.starts_at) for item in room_ranges)
     for item in room_ranges:

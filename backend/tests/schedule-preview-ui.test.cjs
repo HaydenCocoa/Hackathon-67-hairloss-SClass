@@ -79,6 +79,24 @@ test('page submits selected week, shows progress, and renders safe local-time pr
   } finally { dom.window.close(); }
 });
 
+test('quality measurements are shown for a ranked timetable', async () => {
+  const quality = {
+    student_days: 200, student_idle_minutes_total: 600, student_idle_minutes_average: 3, student_idle_minutes_max: 15,
+    longest_student_day_minutes: 255, lecturer_days: 6, lecturer_idle_minutes_total: 0, lecturer_idle_minutes_max: 0,
+    empty_seats_total: 1410, seat_use_percent: 14.5, reserved_room_classes: 3,
+  };
+  const dom = page(async () => ({ ok: true, json: async () => ({ ...result(), quality_optimized: true, quality }) }));
+  try {
+    submit(dom);
+    await settled(dom);
+    const text = dom.window.document.querySelector('#summary').textContent;
+    for (const expected of [/Ranked by preferencesYes/, /600 min over 200 student-days/, /3 \/ 15 min/, /4h 15m/,
+                            /0 \/ 0 min/, /14\.5% \(1410 empty seats\)/, /Auditorium classes3/]) {
+      assert.match(text, expected);
+    }
+  } finally { dom.window.close(); }
+});
+
 test('non-Monday input is rejected before fetch and editing clears the error', () => {
   let calls = 0;
   const dom = page(() => { calls++; });
@@ -346,7 +364,9 @@ test('served page makes a real HTTP request and renders the real synthetic solve
     const data = JSON.parse(document.querySelector('#raw').textContent);
     assert.equal(data.has_solution, true);
     assert.equal(data.placements.length, data.required_count);
-    assert.equal(data.quality_optimized, false);
+    assert.equal(data.quality_optimized, true);
+    assert.ok(data.quality.student_days >= 1);
+    assert.match(document.querySelector('#summary').textContent, /Student idle \(total\)/);
     assert.equal('student_ids' in data.placements[0], false);
     // The stand-in models an empty following week, without changing hosted data.
     document.querySelector('input').value = '2026-11-16';

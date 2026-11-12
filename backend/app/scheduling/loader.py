@@ -165,6 +165,9 @@ class SchedulingSnapshot(_Frozen):
     class_bookings: tuple[ClassBooking, ...]
     meeting_bookings: tuple[MeetingBooking, ...]
     room_rules: tuple[RoomRule, ...] = ()
+    # Captured compulsory policy (part of the revision). Defaults keep hand-built test snapshots unchanged.
+    min_gap_minutes: int = Field(default=0, ge=0, strict=True)
+    reserved_room_types: frozenset[RoomType] = frozenset()
 
     @property
     def pending_requirements(self) -> tuple[ClassRequirement, ...]:
@@ -384,6 +387,7 @@ async def load_scheduling_snapshot(
         class_bookings=tuple(class_inputs), meeting_bookings=tuple(sorted(data.meeting_bookings, key=lambda item: str(item.id))),
         room_rules=tuple(RoomRule(course_type=kind, allowed_room_types=frozenset(allowed))
                          for kind, allowed in sorted(settings.room_compatibility.items())),
+        min_gap_minutes=settings.min_gap_minutes, reserved_room_types=frozenset(settings.reserved_room_types),
     )
     content = snapshot.model_dump(mode="json", exclude={"revision", "captured_at", "database_snapshot"})
     revision = hashlib.sha256(json.dumps(_canonical(content), sort_keys=True, separators=(",", ":")).encode()).hexdigest()

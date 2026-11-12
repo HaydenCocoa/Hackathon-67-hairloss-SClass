@@ -13,8 +13,9 @@ ProposalMode = Literal["schedule", "reschedule"]
 
 IssueCode = Literal[
     "OCCURRENCE_NOT_FOUND", "OCCURRENCE_CANCELLED", "ALREADY_SCHEDULED", "NOT_SCHEDULED",
-    "ORIGINAL_BOOKING_NOT_FOUND", "INVALID_START_TIME", "OUTSIDE_HORIZON", "OUTSIDE_TEACHING_HOURS",
-    "ROOM_NOT_FOUND", "ROOM_INACTIVE", "ROOM_TOO_SMALL", "ROOM_POLICY_UNDEFINED", "ROOM_TYPE_MISMATCH",
+    "ORIGINAL_BOOKING_NOT_FOUND", "INVALID_START_TIME", "START_NOT_WHOLE_MINUTE", "OUTSIDE_HORIZON",
+    "OUTSIDE_TEACHING_HOURS", "ROOM_NOT_FOUND", "ROOM_INACTIVE", "ROOM_TOO_SMALL", "ROOM_POLICY_UNDEFINED",
+    "ROOM_TYPE_MISMATCH", "ROOM_RESERVED_FOR_LARGE_CLASSES",
     "LECTURER_CONFLICT", "STUDENT_CONFLICT", "ROOM_CONFLICT",
 ]
 
@@ -125,15 +126,26 @@ class BookingValidator:
             issues.append(BookingIssue(code="ROOM_POLICY_UNDEFINED", detail="No allowed room types are configured for this teaching type."))
         elif room is not None and room.room_type not in allowed:
             issues.append(BookingIssue(code="ROOM_TYPE_MISMATCH", detail="The room type is not permitted for this teaching type by the configured policy."))
+        elif room is not None and room.room_type in self.snapshot.reserved_room_types and any(
+                other.is_active and other.room_type in allowed and other.room_type not in self.snapshot.reserved_room_types
+                and other.capacity >= item.student_count for other in self.snapshot.rooms):
+            # Capacity only, not availability: a busy classroom does not unlock the auditorium.
+            issues.append(BookingIssue(code="ROOM_RESERVED_FOR_LARGE_CLASSES", detail=(
+                "This room type is kept for classes that no other permitted room can seat; a smaller permitted room is large enough.")))
         return tuple(issues)
 
     def blocking_intervals(
         self, occurrence_id: UUID, room_id: UUID, mode: ProposalMode = "schedule",
     ) -> tuple[BlockingInterval, ...]:
-        """Shared resource blockers; callers first check occurrence_issues."""
+        """Shared resource blockers; callers first check occurrence_issues.
+
+        Each blocker is widened by the compulsory gap on both sides, so a class
+        must also start and end at least `min_gap_minutes` away from it."""
         item = self.get_requirement(occurrence_id)
         if item is None:
             return ()
+        gap = timedelta(minutes=self.snapshot.min_gap_minutes)
+        near = f" or is less than {self.snapshot.min_gap_minutes} minutes away" if gap else ""
         original_id = item.class_session_id if mode == "reschedule" else None
         intervals = []
         for kind, booking in self._bookings:
@@ -144,17 +156,18 @@ class BookingValidator:
                 continue
             issues = []
             if booking.lecturer_id == item.lecturer_id:
-                issues.append(BookingIssue(code="LECTURER_CONFLICT", detail="The assigned lecturer has an overlapping booking.",
+                issues.append(BookingIssue(code="LECTURER_CONFLICT", detail=f"The assigned lecturer has a booking that overlaps{near}.",
                                            booking_id=booking.id, booking_kind=kind))
             shared = item.student_ids & booking.student_ids
             if shared:
-                issues.append(BookingIssue(code="STUDENT_CONFLICT", detail="Attending students have an overlapping booking.",
+                issues.append(BookingIssue(code="STUDENT_CONFLICT", detail=f"Attending students have a booking that overlaps{near}.",
                                            booking_id=booking.id, booking_kind=kind, conflicting_student_count=len(shared)))
             if booking.room_id is not None and booking.room_id == room_id:
-                issues.append(BookingIssue(code="ROOM_CONFLICT", detail="The room has an overlapping booking or reservation.",
+                issues.append(BookingIssue(code="ROOM_CONFLICT", detail=f"The room has a booking or reservation that overlaps{near}.",
                                            booking_id=booking.id, booking_kind=kind))
             if issues:
-                intervals.append(BlockingInterval(starts_at=booking.starts_at, ends_at=booking.ends_at, issues=tuple(issues)))
+                intervals.append(BlockingInterval(starts_at=booking.starts_at - gap, ends_at=booking.ends_at + gap,
+                                                  issues=tuple(issues)))
         return tuple(intervals)
 
     def validate(self, proposal: BookingProposal) -> BookingValidation:
@@ -185,6 +198,9 @@ class BookingValidator:
             issues.extend(lifecycle_issues)
             return result()
 
+        if proposal.starts_at.second or proposal.starts_at.microsecond:
+            issue("START_NOT_WHOLE_MINUTE", "Classes start on a whole minute (no seconds).")
+            return result()
         if not (self.snapshot.horizon_starts_at <= proposal.starts_at and ends_at <= self.snapshot.horizon_ends_at):
             issue("OUTSIDE_HORIZON", "The full class must fit within the selected scheduling week; load its target week first.")
             return result()

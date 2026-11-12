@@ -79,8 +79,6 @@ class SchedulePreview(ScheduleResult):
     scope: Literal["intake", "intake_group"]
     intake_id: UUID
     group_number: int | None
-    quality_optimized: Literal[False] = False
-    quality: None = None
 
 
 class PreviewErrorDetail(BaseModel):
@@ -154,7 +152,10 @@ def create_preview_router(settings: Settings) -> APIRouter:
         "/api/schedules/generate", response_model=SchedulePreview, dependencies=admin_only,
         responses={code: {"model": PreviewError} for code in (401, 403, 404, 429, 500, 502, 503, 504)},
         summary="Generate a read-only weekly schedule preview (local development)",
-        description="Schedules pending occurrences for one intake and optionally one group. All existing bookings remain fixed. Never saves bookings. Quality optimization is postponed.",
+        description="Schedules pending occurrences for one intake and optionally one group. All existing bookings remain fixed. "
+                    "Compulsory rules (opening hours, whole-minute starts, room policy, capacity, no clashes, the configured gap "
+                    "between classes) are always enforced; the configured preferences (student idle time, lecturer idle time, "
+                    "room fit) then rank valid timetables, and the result includes quality measurements. Never saves bookings.",
     )
     async def generate(body: GenerationRequest, request: Request, response: Response):
         response.headers["Cache-Control"] = "no-store"
@@ -173,7 +174,8 @@ def create_preview_router(settings: Settings) -> APIRouter:
                 snapshot = select_scope(snapshot, body.intake_id, body.group_number)
                 event("snapshot_loaded", stage="solve", pending_count=len(snapshot.pending_requirements))
                 event("solver_started", stage="solve")
-                result = await anyio.to_thread.run_sync(solve_weekly_schedule, snapshot, settings.scheduling.solver)
+                result = await anyio.to_thread.run_sync(solve_weekly_schedule, snapshot, settings.scheduling.solver,
+                                                        settings.scheduling.quality)
                 event("solver_completed", status=result.status, placement_count=len(result.placements),
                       duration_ms=round(result.statistics.elapsed_seconds * 1000, 2))
                 if result.status == "MODEL_INVALID":

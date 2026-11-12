@@ -41,6 +41,18 @@ function render(data, requestId = "") {
   summary.replaceChildren();
   const metrics = [["Solver outcome", data.status], ["Proposed / required", `${data.placements.length} / ${data.required_count}`],
     ["Campus timezone", data.timezone], ["Engine elapsed", `${data.statistics.elapsed_seconds.toFixed(2)}s`]];
+  // Step 8 quality measurements (only for a complete timetable).
+  const q = data.quality;
+  if (q) {
+    const span = minutes => `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;
+    metrics.push(["Ranked by preferences", data.quality_optimized ? "Yes" : "No"],
+      ["Student idle (total)", `${q.student_idle_minutes_total} min over ${q.student_days} student-days`],
+      ["Student idle (avg / worst day)", `${q.student_idle_minutes_average} / ${q.student_idle_minutes_max} min`],
+      ["Longest student day", span(q.longest_student_day_minutes)],
+      ["Lecturer idle (total / worst day)", `${q.lecturer_idle_minutes_total} / ${q.lecturer_idle_minutes_max} min`],
+      ["Seat use", `${q.seat_use_percent}% (${q.empty_seats_total} empty seats)`],
+      ["Auditorium classes", String(q.reserved_room_classes)]);
+  }
   for (const [label, value] of metrics) {
     const metric = document.createElement("div");
     metric.className = "metric";

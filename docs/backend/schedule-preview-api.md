@@ -8,7 +8,7 @@ The user postponed step 8 (timetable quality optimization), requested implementa
 
 Make the existing engine callable through FastAPI so a developer or authorized scheduler can select a week and inspect a complete proposed timetable without building a frontend. Generating a preview does not create class sessions, reserve resources, publish a timetable, or modify teaching occurrences.
 
-The result satisfies compulsory scheduling rules against its captured input. With step 8 postponed, it does not minimize student gaps, lecturer gaps, or room usage. A valid result may therefore contain long gaps. Preserve the accepted opening hours, arbitrary start times, and room compatibility rules.
+The result satisfies compulsory scheduling rules against its captured input. Since 12 November 2026 ([timetable quality](timetable-quality.md)) these include whole-minute starts, a 15-minute gap between bookings sharing a room/lecturer/student, and auditoriums only for classes no other permitted room can seat; the configured preferences then reduce student and lecturer idle time and empty seats.
 
 ## Request and scope
 
@@ -51,13 +51,13 @@ One request returns its result; there is no background-job queue or polling API.
 | `placements` | Occurrence, section, lecturer, room and intake IDs, group number, UTC start/end, student count, course code/name/type, room name/building |
 | `diagnostics`, `candidate_failures` | Structured explanations where available, without private attendee lists |
 | `statistics` | Actual search options, elapsed/search time, and solver statistics |
-| `quality_optimized` | Explicitly `false` while step 8 is postponed |
-| `quality` | `null` until meaningful quality measurements are implemented |
+| `quality_optimized` | `true` when the configured preferences produced the returned timetable (since 12 November 2026) |
+| `quality` | Measurements of a complete timetable (idle minutes, longest day, seat use, auditorium classes); `null` otherwise. See [timetable quality](timetable-quality.md) |
 | `scope`, `intake_id`, `group_number` | `intake` or `intake_group`, selected intake UUID and optional group number |
 
 Placement instants retain the engine's UTC representation alongside the campus timezone for display. The raw snapshot, student UUID sets, server credentials, and provider error bodies are excluded. Course and room labels come from the existing snapshot, without extra provider calls. Lecturer and intake display names are not loaded; the page shows their IDs. Preview results, handled errors, and page assets use `Cache-Control: no-store`.
 
-`OPTIMAL`/`FEASIBLE` provide the complete requested pending set. With the current zero-objective model, `OPTIMAL` does not mean gaps or room usage have been optimized. `INFEASIBLE` indicates no complete placement exists for the captured constraints; `UNKNOWN` means the search did not establish a complete result or impossibility. `NO_PENDING_REQUIREMENTS` is an explicit empty outcome. Never return a partial schedule as success. Diagnostics are not promised to identify a minimum conflicting set.
+`OPTIMAL`/`FEASIBLE` provide the complete requested pending set. With preferences on, `OPTIMAL` means the best timetable under the configured weights was proven; `FEASIBLE` means valid but not proven best (an `OPTIMIZATION_INCOMPLETE` diagnostic means it was not improved at all). `INFEASIBLE` indicates no complete placement exists for the captured constraints; `UNKNOWN` means the search did not establish a complete result or impossibility. `NO_PENDING_REQUIREMENTS` is an explicit empty outcome. Never return a partial schedule as success. Diagnostics are not promised to identify a minimum conflicting set.
 
 | HTTP | Meaning |
 | --- | --- |
