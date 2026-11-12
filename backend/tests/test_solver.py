@@ -260,7 +260,7 @@ def test_invalid_search_settings_fail_validation(changes):
 
 
 def test_search_options_are_configurable_and_recorded(snapshot):
-    assert load_settings().scheduling.solver.max_time_seconds == 10
+    assert load_settings().scheduling.solver.max_time_seconds == 120  # raised from 10 s on 12 November 2026
     options = SolverSettings(max_time_seconds=2, num_search_workers=1, random_seed=7)
     result = solve_weekly_schedule(snapshot, options)
     assert result.has_solution

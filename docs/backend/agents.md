@@ -342,6 +342,7 @@ Historical discussion; superseded by the implementation record below after the u
   - Confirm the two interpretations (gap scope, capacity-based auditorium rule).
   - Decide whether to add a "fewer days on campus" preference.
   - Check preview time on hosting.
+- **Time limit raised (12 November 2026):** at the user's request `scheduling.solver.max_time_seconds` is now 120 s (was 10 s). An unlimited value is not supported (0 and infinity are rejected at startup). With preferences on, a preview can take up to about 2 minutes plus loading time, holding the one-at-a-time slot.
 
 ## `rescheduled` class-session status — 12 November 2026
 

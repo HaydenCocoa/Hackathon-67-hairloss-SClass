@@ -16,7 +16,7 @@ Make valid timetables comparable with meaningful measurements and let configured
 | Q2 | Combining priorities | **Weighted sum** in one search: student idle 100, lecturer idle 10, room fit 1. |
 | Q3 | Room utilization | **Compulsory:** auditoriums are used only for a class that no other permitted room can seat. **Preference:** among allowed rooms, fewer empty seats (room fit). |
 | Q4 | Balance across the week | No extra rule; `longest_student_day_minutes` is reported. |
-| Q5 | Time limit | `solver.max_time_seconds` (10 s), shared by both searches. |
+| Q5 | Time limit | `solver.max_time_seconds`, shared by both searches. 10 s at first; **raised to 120 s (2 minutes) by the user on 12 November 2026.** It must be greater than 0 (0 or unlimited is rejected at startup). |
 | Q6 | Switching off | Config only (`quality.enabled`); no request option. |
 | Q7 | Broken solver fixtures | Fixed first (test code only). |
 | Q8 | Branch | Current branch, `backend-enhancement`. |
@@ -147,7 +147,7 @@ Local synthetic data only; the hosted Supabase project was not contacted.
 
 ## Risks and limits
 
-1. **Preview time.** With preferences on, a preview usually uses the whole time limit (10 s) because proving the best answer is hard even when it has been found. This counts against a hosted function's time limit.
+1. **Preview time.** With preferences on, a preview usually uses the whole time limit (now 120 s) because proving the best answer is hard even when it has been found. The admin waits that long, other previews and saves get `GENERATION_BUSY` meanwhile, and a closed browser does not stop the search. The development page is local-only, so hosted function limits do not apply to it today.
 2. **Spreading across days.** Minimizing waiting time favours one class per day (see the example: student-days 80 → 200). That has no idle time but means more days on campus. A "fewer days" or "balanced days" preference is not implemented (Q4 deferred).
 3. **Repeatability.** The improvement search stops on wall-clock time, so two runs can return different (equally valid) timetables.
 4. **Capacity, not availability,** decides whether an auditorium is allowed. A large class may therefore be unschedulable if the only big-enough classroom is busy all week, even though the auditorium is free.

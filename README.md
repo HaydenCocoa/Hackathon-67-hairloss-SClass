@@ -114,7 +114,7 @@ Generate one occurrence or every pending occurrence from an existing snapshot. R
 
 `solve_weekly_schedule(snapshot, settings.scheduling.solver)` uses OR-Tools CP-SAT to assign a room and start to every pending lesson together. It enforces clashes for shared rooms, lecturers, and students across intakes, preserves fixed bookings, and verifies the complete result before returning it. Time is encoded in exact relative microseconds, without preset teaching slots.
 
-Install updated backend requirements for OR-Tools. Configure `scheduling.solver` for search time (default 10 seconds), worker count (default 1), and random seed (default 0). Results distinguish complete solutions, proven infeasibility, unresolved search, invalid models, and an empty pending week. No partial timetable is returned as complete.
+Install updated backend requirements for OR-Tools. Configure `scheduling.solver` for search time (120 seconds in `Config/config.json` since 12 November 2026; 10 seconds when unset), worker count (default 1), and random seed (default 0). Results distinguish complete solutions, proven infeasibility, unresolved search, invalid models, and an empty pending week. No partial timetable is returned as complete.
 
 This engine produces a feasibility draft. Quality objectives are postponed; step 9 exposes local preview generation and step 10 saves a reviewed preview (local development; login-based authorization is deferred). No new database migration is required for these computation/API steps. See [solver setup, usage, statuses, and verification](docs/backend/cp-sat-scheduling.md).
 
