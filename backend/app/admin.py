@@ -7,6 +7,7 @@ import httpx
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from .auth import get_session
 from .config import SupabaseSettings
 from .student import Supabase, in_list
 
@@ -47,8 +48,19 @@ def create_admin_router(settings: SupabaseSettings):
     tables = {'courses', 'students', 'lecturers', 'admins', 'intakes'}
 
     async def authorized(request: Request, authorization: str | None):
-        if not authorization or not authorization.startswith('Bearer '):
-            raise HTTPException(401, 'Admin sign-in required.')
+        """Return (database client, the admin's 'Bearer <token>'), or raise 401/403.
+
+        A logged-in admin (login cookie) is accepted directly. A pasted Supabase
+        token in the Authorization header still works as before."""
+        token = authorization.removeprefix('Bearer ').strip() if authorization and authorization.startswith('Bearer ') else ''
+        if not token:
+            session = await get_session(request)
+            if session is None:
+                raise HTTPException(401, 'Admin sign-in required.')
+            if session.role != 'admin':
+                raise HTTPException(403, 'Administrator access required.')
+            return Supabase(settings, request.app.state.http_client), f'Bearer {request.state.access_token}'
+        authorization = f'Bearer {token}'
         db = Supabase(settings, request.app.state.http_client)
         try:
             response = await db.client.get(f'{db.url}/auth/v1/user', headers={**db.headers, 'Authorization': authorization}, timeout=db.timeout)
@@ -60,7 +72,7 @@ def create_admin_router(settings: SupabaseSettings):
             raise HTTPException(502, 'Could not verify the admin session.')
         if not admins:
             raise HTTPException(403, 'Administrator access required.')
-        return db
+        return db, authorization
 
     async def read_all(db: Supabase, table: str, params: list[tuple[str, str]]):
         rows = []
@@ -72,7 +84,7 @@ def create_admin_router(settings: SupabaseSettings):
 
     @router.get('/timetable/rooms')
     async def timetable_rooms(request: Request, authorization: str | None = Header(default=None)):
-        db = await authorized(request, authorization)
+        db, _ = await authorized(request, authorization)
         return await read_all(db, 'rooms', [('select', 'id,name,building,room_type,capacity'), ('is_active', 'eq.true'), ('order', 'name,id')])
 
     async def timetable_rpc(db: Supabase, authorization: str, name: str, body: dict):
@@ -101,7 +113,7 @@ def create_admin_router(settings: SupabaseSettings):
 
     @router.put('/timetable/{session_id}')
     async def reschedule(session_id: UUID, payload: Reschedule, request: Request, authorization: str | None = Header(default=None)):
-        db = await authorized(request, authorization)
+        db, authorization = await authorized(request, authorization)
         if payload.expected_start.tzinfo is None or payload.new_start.tzinfo is None:
             raise HTTPException(422, 'Times must include a timezone.')
         return await timetable_rpc(db, authorization, 'admin_reschedule_class', {
@@ -112,12 +124,12 @@ def create_admin_router(settings: SupabaseSettings):
 
     @router.delete('/timetable/{session_id}')
     async def remove_cancelled(session_id: UUID, request: Request, authorization: str | None = Header(default=None)):
-        db = await authorized(request, authorization)
+        db, authorization = await authorized(request, authorization)
         return await timetable_rpc(db, authorization, 'admin_remove_cancelled_class', {'session_id': str(session_id)})
 
     @router.get('/timetable')
     async def timetable(request: Request, start: datetime, end: datetime, authorization: str | None = Header(default=None)):
-        db = await authorized(request, authorization)
+        db, _ = await authorized(request, authorization)
         if start.tzinfo is None or end.tzinfo is None or end <= start or end - start > timedelta(days=31):
             raise HTTPException(422, 'Choose a valid date range of no more than 31 days with a timezone.')
         sessions = await read_all(db, 'class_session_details', [
@@ -143,7 +155,7 @@ def create_admin_router(settings: SupabaseSettings):
     async def manage(table: str, request: Request, item_id: UUID | None = None, authorization: str | None = Header(default=None)):
         if table not in tables:
             raise HTTPException(404, 'Unknown resource.')
-        db = await authorized(request, authorization)
+        db, _ = await authorized(request, authorization)
         if request.method == 'GET':
             select = '*,course_offerings(intakes(intake_code))' if table == 'courses' else '*'
             return await read_all(db, table, [('select', select), ('order', 'id')])

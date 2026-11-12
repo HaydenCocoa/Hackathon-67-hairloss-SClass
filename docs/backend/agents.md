@@ -344,6 +344,22 @@ Historical discussion; superseded by the implementation record below after the u
   - Check preview time on hosting.
 - **Time limit raised (12 November 2026):** at the user's request `scheduling.solver.max_time_seconds` is now 120 s (was 10 s). An unlimited value is not supported (0 and infinity are rejected at startup). With preferences on, a preview can take up to about 2 minutes plus loading time, holding the one-at-a-time slot.
 
+## `main` merge repair — 12 November 2026
+
+- **Problem:** merging the Admin branch (PR #13) left unresolved conflict text on `main` in `backend/app/main.py` (`SyntaxError`, the backend could not start), `frontend/src/App.vue` and `frontend/src/admin/AdminPage.vue` (the frontend build failed). Found while validating step 11.
+- **Work done on branch `fix-main-merge-conflicts`,** created from the updated `main` at the user's request.
+- **Fixes:**
+  - `main.py`: both the admin and lecturer routers are included. CORS allows GET, POST, PUT, PATCH and DELETE plus the `Authorization` header (admin page and lecturer reschedule), and still exposes `X-Request-ID`.
+  - `App.vue`: restored to the login shell from before the merge. The merge had re-added the old main menu, `#/` routing and a duplicate `AdminPage` import, which login replaced on 12 November.
+  - `AdminPage.vue`: the admin page from its author's commit `28c7609` ("Admin pages combined"); the earlier empty placeholder was dropped, as intended once the admin page existed.
+- **Also changed (needed for the admin page to work with login):**
+  - `backend/app/admin.py` accepts the logged-in admin's session cookie when no token is pasted; a pasted `Authorization: Bearer` token still works.
+  - The admin timetable database functions run as that admin, using the session's access token. `get_session` keeps the verified access token on `request.state`, server-side only.
+  - Before this, a logged-in admin could not use the page: their token is in an httpOnly cookie they cannot read, and a blank token returned 401, which sent them to the login page.
+- **Tests:** the auth test fake now has the fields the lecturer reschedule code reads, a room table, a `schedule_changes` insert, `true`/`false` matching and paging. One test checks the reschedule log's `changed_by`; a new test covers admin API access with the login session.
+- **Verification:** the backend starts and the frontend builds. Full backend suite: 337 passed, with the same 10 older loader/preview failures as before. The auth test broken by the merged lecturer code is fixed, and the new admin-session test passes. All 9 database test sets pass. Frontend: 12/12 lecturer and 7/7 login tests. Scheduling page: 20/20, including the served QA run. Not run against hosted Supabase or in a real browser.
+- **Not changed (reported in the step 11 validation):** the admin page frontend still shows a token box; the admin reschedule database function ignores `rescheduled` classes when checking clashes (double-booking reproduced locally); the lecturer move does not check opening hours, room type, the 15-minute gap or the auditorium rule; cancellation and reservations are not built.
+
 ## `rescheduled` class-session status — 12 November 2026
 
 - Work done on branch `backend-enhancement`, created from `main` at the user's request. The user will continue other work on this branch.

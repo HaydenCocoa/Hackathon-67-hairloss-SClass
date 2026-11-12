@@ -281,19 +281,24 @@ async def get_session(request: Request) -> SessionUser | None:
     if not access and not refresh:
         return None
     cache: SessionCache = request.app.state.auth_sessions
+    # The verified access token is kept on request.state (server-side only) for calls
+    # that must run as this user in the database, such as the admin timetable functions.
     if access and (cached := cache.get(access)):
+        request.state.access_token = access
         return cached
     auth = SupabaseAuth(request.app.state.supabase_settings, request.app.state.http_client)
     if access:
         user = await auth.user(access)
         if user and (session := await auth.session_for(user)):
             cache.put(access, session)
+            request.state.access_token = access
             return session
     if refresh:
         tokens = await auth.refresh(refresh)
         if tokens and (session := await auth.session_for(tokens["user"])):
             queue_session_cookies(request, tokens)
             cache.put(tokens["access_token"], session)
+            request.state.access_token = tokens["access_token"]
             return session
     queue_clear_cookies(request)
     return None

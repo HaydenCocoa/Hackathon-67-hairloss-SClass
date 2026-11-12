@@ -63,6 +63,7 @@ The backend applies these rules when a page is loaded directly; the Vue app repe
 | `GET /api/lecturers/{id}/timetable` | Lecturers: their own id only; admins: any |
 | `PATCH /api/lecturers/{id}/sessions/{sid}` | Lecturers: own id **and** the class must belong to that lecturer; admins: any lecturer's class |
 | `POST /api/schedules/generate`, `POST /api/schedules/save`, scheduling page and assets | Admins only, plus development mode and localhost |
+| `/api/admin/*` (admin page) | Admins only: the login session, or a pasted Supabase token (since 12 November 2026). Timetable changes run in the database as that admin. |
 
 Errors: `401 AUTH_REQUIRED`, `403 FORBIDDEN_ROLE` / `ADMIN_REQUIRED`; login errors `INVALID_CREDENTIALS` (401), `ACCOUNT_NOT_LINKED` / `EMAIL_NOT_CONFIRMED` (403), `TOO_MANY_ATTEMPTS` (429), `AUTH_NOT_CONFIGURED` (503), `AUTH_UNAVAILABLE` (502), `AUTH_TIMEOUT` (504). The student endpoints keep their existing plain-text error style. Passwords and tokens are never returned in response bodies or logged.
 
