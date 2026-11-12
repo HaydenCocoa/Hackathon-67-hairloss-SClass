@@ -1,4 +1,4 @@
-"""Complete feasible start ranges against fixed bookings, without a time grid."""
+"""Complete feasible start ranges against fixed bookings: any whole minute, no coarser grid."""
 
 from datetime import datetime, timedelta, timezone
 from typing import Literal
@@ -83,6 +83,18 @@ class WeeklyCandidates(_Frozen):
 class _Request(_Frozen):
     occurrence_id: UUID
     mode: ProposalMode
+
+
+MINUTE = timedelta(minutes=1)
+
+
+def _whole_minutes(earliest: datetime, latest: datetime) -> tuple[datetime, datetime] | None:
+    """Narrow a start range to whole-minute starts (accepted 12 November 2026); None if none fit."""
+    low = earliest.replace(second=0, microsecond=0)
+    if low < earliest:
+        low += MINUTE
+    high = latest.replace(second=0, microsecond=0)
+    return (low, high) if low <= high else None
 
 
 def _merged(intervals: list[tuple[datetime, datetime]]) -> list[tuple[datetime, datetime]]:
@@ -170,9 +182,9 @@ class CandidateGenerator:
                 if closes_at - cursor >= duration:
                     gaps.append((cursor, closes_at - duration))
                 room_ranges.extend(CandidateRange(
-                    occurrence_id=occurrence_id, room_id=room.id, earliest_start=start,
-                    latest_start=end, duration_minutes=requirement.duration_minutes,
-                ) for start, end in gaps)
+                    occurrence_id=occurrence_id, room_id=room.id, earliest_start=bounds[0],
+                    latest_start=bounds[1], duration_minutes=requirement.duration_minutes,
+                ) for bounds in (_whole_minutes(start, end) for start, end in gaps) if bounds is not None)
             ranges.extend(room_ranges)
             if not room_ranges:
                 # Supporting blockers, not a claimed minimum explanation of infeasibility.

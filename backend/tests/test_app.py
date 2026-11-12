@@ -16,7 +16,8 @@ from backend.app.main import create_app
 
 def logged_in(app):
     """Database health needs a login; act as a logged-in student."""
-    app.dependency_overrides[get_session] = lambda: SessionUser(role="student", name="T", profile_id="s", code="S1", home="/student")
+    app.dependency_overrides[get_session] = lambda: SessionUser(role="student", name="T", profile_id="s", code="S1", home="/student",
+                                                                auth_user_id="00000000-0000-0000-0000-0000000000a1")
     return app
 
 

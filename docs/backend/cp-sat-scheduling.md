@@ -6,6 +6,8 @@ Status: complete and verified locally. No new SQL migration or hosted data chang
 
 ## Design decisions
 
+**Changed 12 November 2026 (step 8, [timetable quality](timetable-quality.md)):** time is encoded in whole minutes (not microseconds); each new class occupies its resources for its duration plus the compulsory 15-minute gap; with preferences on, a second search minimizes the weighted student idle, lecturer idle and room-fit objective, starting from the first valid timetable. Statements below about microsecond time and feasibility-only solving describe step 7.
+
 - Generate one room/start assignment for every pending occurrence in the captured week. Existing scheduled classes, reservations, meetings, and cancelled demand are not changed.
 - Generate candidate ranges internally from the trusted snapshot. Do not accept externally altered candidate domains or silently omit a lesson with no ranges.
 - Encode time as integer microseconds relative to the week's UTC horizon start. This exactly preserves Python/PostgreSQL timestamp precision without preset teaching slots or float timestamp conversion.
@@ -31,7 +33,7 @@ Configure `scheduling.solver` in `Config/config.json`:
 
 ```json
 "solver": {
-  "max_time_seconds": 10,
+  "max_time_seconds": 120,
   "num_search_workers": 1,
   "random_seed": 0
 }
@@ -70,7 +72,7 @@ Only pending occurrences receive new assignments. Existing scheduled lessons rem
 
 | Status | Interpretation |
 | --- | --- |
-| `OPTIMAL` | CP-SAT solved the current feasibility model; quality objectives begin in step 8 |
+| `OPTIMAL` | Without preferences: the feasibility model is solved. With preferences (since 12 November 2026): proven best timetable under the configured weights |
 | `FEASIBLE` | A complete valid assignment is available |
 | `INFEASIBLE` | Empty candidate domains or solver proof establish no complete assignment under this captured input |
 | `UNKNOWN` | Search ended without a solution/proof; this does not establish impossibility |
@@ -121,4 +123,4 @@ The full integration suite also requires the previously established local Node/P
 
 ## Remaining work
 
-The user postponed step 8's quality objectives for student gaps, lecturer gaps, and room utilization on 10 November 2026. [Step 9's local preview API and test page](schedule-preview-api.md) now use this feasibility solver. Administrator authentication, transactional booking/audit writes, stale-input revalidation, and lecturer rescheduling orchestration remain unimplemented. A valid draft is tied to captured input and does not reserve resources against concurrent changes.
+Step 8's quality objectives were postponed on 10 November 2026 and implemented on 12 November 2026 ([timetable quality](timetable-quality.md)). [Step 9's local preview API and test page](schedule-preview-api.md) now use this feasibility solver. Administrator authentication, transactional booking/audit writes, stale-input revalidation, and lecturer rescheduling orchestration remain unimplemented. A valid draft is tied to captured input and does not reserve resources against concurrent changes.

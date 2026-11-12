@@ -29,7 +29,7 @@ def snapshot():
         teaching_week_number=1, occurrence_number=1, requirement_status="required",
         timezone="Asia/Kuala_Lumpur", class_session_id=None, booking_status=None,
         starts_at=None, room_id=None, needs_scheduling=True,
-        group_number=1, required_room_type=None, intake_id=uid(103), lecturer_id=uid(20),
+        group_number=1, intake_id=uid(103), lecturer_id=uid(20),
         course_id=uid(104), course_code="TEST", course_name="Subject", course_type="lecture",
         duration_minutes=90, student_ids=frozenset([uid(10), uid(11)]),
     )
@@ -86,7 +86,7 @@ def with_original(snapshot):
 
 
 @pytest.mark.parametrize("at", [
-    "2026-11-09T08:30:00+08:00", "2026-11-09T09:17:23.123456+08:00",
+    "2026-11-09T08:30:00+08:00", "2026-11-09T09:17:00+08:00",
     "2026-11-09T12:00:00+08:00", "2026-11-09T16:30:00+08:00", "2026-11-09T01:17:00Z",
 ])
 def test_valid_arbitrary_start_and_full_duration(snapshot, at):
@@ -98,8 +98,11 @@ def test_valid_arbitrary_start_and_full_duration(snapshot, at):
 
 
 @pytest.mark.parametrize("at,code", [
-    ("2026-11-09T08:29:59+08:00", "OUTSIDE_TEACHING_HOURS"),
-    ("2026-11-09T16:30:00.000001+08:00", "OUTSIDE_TEACHING_HOURS"),
+    ("2026-11-09T08:29:00+08:00", "OUTSIDE_TEACHING_HOURS"),
+    ("2026-11-09T16:31:00+08:00", "OUTSIDE_TEACHING_HOURS"),
+    # Whole-minute starts (accepted 12 November 2026): any minute, but no seconds.
+    ("2026-11-09T09:17:23.123456+08:00", "START_NOT_WHOLE_MINUTE"),
+    ("2026-11-09T08:30:00.000001+08:00", "START_NOT_WHOLE_MINUTE"),
     ("2026-11-09T18:00:00+08:00", "OUTSIDE_TEACHING_HOURS"),
     ("2026-11-14T10:00:00+08:00", "OUTSIDE_TEACHING_HOURS"),
     ("2026-11-08T10:00:00+08:00", "OUTSIDE_HORIZON"),
@@ -205,6 +208,22 @@ def test_cancelled_booking_does_not_block_availability(snapshot):
     # The real loader already excludes these; exercise the validator's defensive guard.
     snapshot = snapshot.model_copy(update={"class_bookings": (fixed.model_copy(update={"status": "cancelled"}),)})
     assert validate_booking(snapshot, proposed(snapshot)).valid
+
+
+def test_rescheduled_booking_blocks_like_a_scheduled_one(snapshot):
+    fixed = booking(lecturer_id=uid(20), room_id=uid(1), student_ids=frozenset([uid(10)]), status="rescheduled")
+    snapshot = snapshot.model_copy(update={"class_bookings": (fixed,)})
+    assert validate_booking(snapshot, proposed(snapshot)).reason_codes == (
+        "LECTURER_CONFLICT", "STUDENT_CONFLICT", "ROOM_CONFLICT")
+
+
+def test_rescheduled_occurrence_is_booked_and_can_be_moved_again(snapshot):
+    snapshot = with_original(snapshot)
+    original = snapshot.class_bookings[0].model_copy(update={"status": "rescheduled"})
+    snapshot = change_requirement(snapshot, booking_status="rescheduled")
+    snapshot = snapshot.model_copy(update={"class_bookings": (original,)})
+    assert validate_booking(snapshot, proposed(snapshot)).reason_codes == ("ALREADY_SCHEDULED",)
+    assert validate_booking(snapshot, proposed(snapshot, mode="reschedule")).valid
 
 
 def test_rescheduling_ignores_only_matching_original_class(snapshot):

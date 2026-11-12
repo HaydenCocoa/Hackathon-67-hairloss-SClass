@@ -167,15 +167,15 @@ Individually valid candidates can still conflict with one another. The solver mu
 
 ## 8. Add timetable quality objectives
 
-**Status:** postponed by the user on 10 November 2026. Continue with step 9 using the existing feasibility solver. These objectives remain future work, not completed requirements.
+**Status:** postponed on 10 November 2026; implemented and verified locally on 12 November 2026 with the user's decisions. See [timetable quality](docs/backend/timetable-quality.md). Not run against hosted Supabase.
 
-- [ ] Measure idle minutes between each student's first and last class per day; no mandatory breaks apply.
-- [ ] Make reducing total student waiting time the first optimization objective.
-- [ ] Add lecturer gap reduction as a lower-priority objective.
-- [ ] Add room utilization as a further preference.
-- [ ] Keep preference priorities configurable.
-- [ ] Keep all compulsory rules mandatory regardless of preference scores.
-- [ ] Return quality measurements alongside the generated timetable.
+- [x] Measure idle minutes between each student's first and last class per day. No mandatory breaks apply, but a compulsory 15-minute gap between bookings sharing a room, lecturer or student was added on 12 November 2026.
+- [x] Make reducing total student waiting time the first optimization objective (weight 100).
+- [x] Add lecturer gap reduction as a lower-priority objective (weight 10).
+- [x] Add room utilization as a further preference: fewer empty seats (weight 1); auditoriums only when no other permitted room can seat the class (compulsory).
+- [x] Keep preference priorities configurable (`scheduling.quality` in `Config/config.json`).
+- [x] Keep all compulsory rules mandatory regardless of preference scores (validator post-check on every result).
+- [x] Return quality measurements alongside the generated timetable (`quality`).
 
 Initial preference order:
 
@@ -211,7 +211,7 @@ Verification status on 11 November: code and HTTP-provider fixtures were updated
 - [x] Verify the caller's permission to perform the scheduling operation: admin login required since 12 November 2026 (plus the development/localhost checks). See [login](docs/backend/login.md).
 - [x] Detect stale previews (scope-bound revision must match) and recheck current data and availability before writing. Not inside one database transaction (accepted for the hackathon).
 - [ ] Use a consistent locking strategy for all relevant booking and roster changes. Partial: saves and previews share one per-process slot, and the insert takes the existing advisory lock. Other writers (dashboard, lecturer reschedule endpoint) do not follow the save checks.
-- [ ] Save assignments and relevant audit information together in one database transaction. Assignments: done (one insert). **Audit deferred until login exists.**
+- [x] Save assignments and relevant audit information together in one database transaction. One insert; each row carries `created_by` and a trigger writes the `schedule_changes` `create` row in the same statement (12 November 2026, [save audit](docs/backend/save-audit.md)). Hosted migration run pending.
 - [x] Prevent duplicate bookings for the same teaching occurrence (unique occurrence constraint; reported as `ALREADY_SAVED`).
 - [x] Handle retries safely so repeated submissions do not duplicate assignments (a retry is `PREVIEW_STALE`; the unique constraint also blocks it).
 - [x] Reject a failed commit without leaving a partially saved timetable (single bulk insert).
@@ -224,6 +224,7 @@ Accepted 11 November 2026: no stored draft (leaving the page loses the preview);
 
 ## 11. Add rescheduling, cancellation, and reservations
 
+- [x] Add a `rescheduled` booking status for a class moved by a lecturer/admin; it occupies resources like `scheduled` (migration `202611120001`, 12 Nov; hosted run pending). See [rescheduled status](docs/backend/rescheduled-status.md).
 - [ ] Reuse calendar rules, candidate search, and booking validation.
 - [ ] Find and rank alternative placements for an existing occurrence.
 - [ ] Keep other classes fixed during ordinary single-class rescheduling.
@@ -285,7 +286,7 @@ All acceptance scenarios must pass before treating the scheduling backend as rea
 - [x] Move development pages under `/admin/development/` with admin login.
 - [ ] Create Supabase accounts and link `auth_user_id` for real users (project owner; steps in [login](docs/backend/login.md)).
 - [ ] Verify login against the hosted Supabase project and in a real browser.
-- [ ] Record who saved a timetable (`schedule_changes`, needs a "create" action).
+- [x] Record who saved a timetable (`schedule_changes` `create` rows; [save audit](docs/backend/save-audit.md)). Hosted migration run pending.
 
 **Complete when:** each role can log in, is limited to its own data, and every protected page redirects to `/login` when not logged in. Locally verified on 12 November; hosted verification pending.
 

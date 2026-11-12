@@ -74,9 +74,9 @@ erDiagram
     CLASS_SESSIONS {
         uuid id PK
         uuid section_id FK
-        uuid room_id FK "Required when scheduled"
+        uuid room_id FK "Required when scheduled or rescheduled"
         timestamptz starts_at
-        text status "scheduled, cancelled"
+        text status "scheduled, rescheduled, cancelled"
     }
     MEETING_SESSIONS {
         uuid id PK

@@ -79,8 +79,6 @@ class SchedulePreview(ScheduleResult):
     scope: Literal["intake", "intake_group"]
     intake_id: UUID
     group_number: int | None
-    quality_optimized: Literal[False] = False
-    quality: None = None
 
 
 class PreviewErrorDetail(BaseModel):
@@ -154,7 +152,10 @@ def create_preview_router(settings: Settings) -> APIRouter:
         "/api/schedules/generate", response_model=SchedulePreview, dependencies=admin_only,
         responses={code: {"model": PreviewError} for code in (401, 403, 404, 429, 500, 502, 503, 504)},
         summary="Generate a read-only weekly schedule preview (local development)",
-        description="Schedules pending occurrences for one intake and optionally one group. All existing bookings remain fixed. Never saves bookings. Quality optimization is postponed.",
+        description="Schedules pending occurrences for one intake and optionally one group. All existing bookings remain fixed. "
+                    "Compulsory rules (opening hours, whole-minute starts, room policy, capacity, no clashes, the configured gap "
+                    "between classes) are always enforced; the configured preferences (student idle time, lecturer idle time, "
+                    "room fit) then rank valid timetables, and the result includes quality measurements. Never saves bookings.",
     )
     async def generate(body: GenerationRequest, request: Request, response: Response):
         response.headers["Cache-Control"] = "no-store"
@@ -173,7 +174,8 @@ def create_preview_router(settings: Settings) -> APIRouter:
                 snapshot = select_scope(snapshot, body.intake_id, body.group_number)
                 event("snapshot_loaded", stage="solve", pending_count=len(snapshot.pending_requirements))
                 event("solver_started", stage="solve")
-                result = await anyio.to_thread.run_sync(solve_weekly_schedule, snapshot, settings.scheduling.solver)
+                result = await anyio.to_thread.run_sync(solve_weekly_schedule, snapshot, settings.scheduling.solver,
+                                                        settings.scheduling.quality)
                 event("solver_completed", status=result.status, placement_count=len(result.placements),
                       duration_ms=round(result.statistics.elapsed_seconds * 1000, 2))
                 if result.status == "MODEL_INVALID":
@@ -214,10 +216,11 @@ def create_preview_router(settings: Settings) -> APIRouter:
         responses={code: {"model": PreviewError} for code in (401, 403, 404, 409, 429, 500, 502, 503, 504)},
         summary="Save a reviewed preview as real class bookings (local development, admin use)",
         description="Re-reads the week, rejects the save if anything changed since the preview, revalidates every class, "
-                    "then inserts all classes into class_sessions in one statement (all or nothing). Saved classes are "
-                    "visible immediately. There is no draft and no undo.",
+                    "then inserts all classes into class_sessions in one statement (all or nothing). Each class records "
+                    "the saving admin (created_by), and the database adds a schedule_changes 'create' audit row in the "
+                    "same statement. Saved classes are visible immediately. There is no draft and no undo.",
     )
-    async def save(body: SaveRequest, request: Request, response: Response):
+    async def save(body: SaveRequest, request: Request, response: Response, admin: SessionUser = Depends(admin_access)):
         response.headers["Cache-Control"] = "no-store"
         try:
             # Same slot as generation: a save never runs alongside a preview or another save.
@@ -233,7 +236,8 @@ def create_preview_router(settings: Settings) -> APIRouter:
                 db = Supabase(settings.supabase, request.app.state.http_client)
                 snapshot = await load_scheduling_snapshot(db, settings.scheduling, body.week_start)
                 snapshot = select_scope(snapshot, body.intake_id, body.group_number)
-                rows = await anyio.to_thread.run_sync(prepare_rows, snapshot, body.snapshot_revision, body.placements)
+                rows = await anyio.to_thread.run_sync(prepare_rows, snapshot, body.snapshot_revision, body.placements,
+                                                      admin.auth_user_id)
                 event("save_validated", row_count=len(rows))
                 writing = True
                 saved = await db.insert("class_sessions", rows, "id,occurrence_id")
@@ -246,7 +250,7 @@ def create_preview_router(settings: Settings) -> APIRouter:
                     week_start=body.week_start.isoformat(), timezone=snapshot.timezone,
                     scope="intake" if body.group_number is None else "intake_group",
                     intake_id=body.intake_id, group_number=body.group_number, snapshot_revision=body.snapshot_revision,
-                    saved_count=len(saved),
+                    saved_count=len(saved), saved_by=admin.name or admin.email or "Administrator",
                     saved=[SavedClass(occurrence_id=row["occurrence_id"], class_session_id=row["id"]) for row in saved],
                 )
             except SaveRejected as exc:
@@ -256,6 +260,10 @@ def create_preview_router(settings: Settings) -> APIRouter:
             except SupabaseWriteError as exc:
                 event("save_write_failed", level=logging.WARNING, provider_status=exc.provider_status,
                       provider_code=exc.provider_code)
+                if exc.provider_code in ("PGRST204", "42703"):
+                    raise failure(503, "AUDIT_NOT_INSTALLED", "The database is missing the save-audit change "
+                                  "(migration 202611120002_save_audit.sql). Nothing was saved. Ask the project owner "
+                                  "to apply it.", "save_rejected") from exc
                 if exc.provider_code == "23505" or exc.provider_status == 409:
                     raise failure(409, "ALREADY_SAVED", "One or more of these classes were booked after the preview was "
                                   "checked. Nothing was saved. Generate a new preview.", "save_rejected") from exc

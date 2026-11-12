@@ -54,12 +54,16 @@ class SaveResult(BaseModel):
     group_number: int | None
     snapshot_revision: str
     saved_count: int
+    saved_by: str = Field(description="Name of the admin recorded in the save audit (schedule_changes)")
     saved: list[SavedClass]
 
 
-def prepare_rows(snapshot: SchedulingSnapshot, revision: str, placements: list[SavePlacement]) -> list[dict]:
+def prepare_rows(snapshot: SchedulingSnapshot, revision: str, placements: list[SavePlacement],
+                 created_by: str) -> list[dict]:
     """Return class_sessions rows, or raise SaveRejected. `snapshot` must already be
-    narrowed to the request's intake/group with preview.select_scope."""
+    narrowed to the request's intake/group with preview.select_scope. `created_by` is
+    the admin's Supabase Auth user id; a database trigger turns it into one
+    schedule_changes 'create' row per class in the same insert."""
     if snapshot.revision != revision:
         raise SaveRejected(409, "PREVIEW_STALE",
                            "The week's bookings or teaching data changed since this preview was generated, "
@@ -95,5 +99,5 @@ def prepare_rows(snapshot: SchedulingSnapshot, revision: str, placements: list[S
                            "Nothing was saved. Generate a new preview.") from exc
     return [{
         "occurrence_id": str(item.occurrence_id), "section_id": str(item.section_id), "room_id": str(item.room_id),
-        "starts_at": item.starts_at.isoformat(), "status": "scheduled",
+        "starts_at": item.starts_at.isoformat(), "status": "scheduled", "created_by": created_by,
     } for item in checked_placements]

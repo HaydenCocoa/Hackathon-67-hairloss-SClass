@@ -36,7 +36,8 @@ TABLES = {
                   {"id": uid(204), "full_name": "Bo Both", "lecturer_code": "LEC004", "auth_user_id": uid(4)}],
     "students": [{"id": uid(301), "full_name": "Sam Student", "student_code": "TP000001", "auth_user_id": uid(3),
                   "student_intakes": []}],
-    "class_session_details": [{"id": uid(401), "lecturer_id": uid(202)}],
+    "class_session_details": [{"id": uid(401), "lecturer_id": uid(202), "status": "scheduled"},
+                              {"id": uid(402), "lecturer_id": uid(202), "status": "cancelled"}],
     "class_sessions": [],
 }
 
@@ -84,8 +85,8 @@ def supabase(monkeypatch):
             self.reply(404, {})
 
         def do_PATCH(self):
-            self.rfile.read(int(self.headers.get("Content-Length", 0)))
-            state["calls"].append({"method": "PATCH", "path": urlsplit(self.path).path})
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+            state["calls"].append({"method": "PATCH", "path": urlsplit(self.path).path, "body": body})
             self.send_response(204)
             self.end_headers()
 
@@ -104,7 +105,9 @@ def supabase(monkeypatch):
                 if key in ("select", "limit", "order", "offset"):
                     continue
                 expected = values[0].removeprefix("eq.")
-                if not values[0].startswith(("gte.", "lt.", "in.")):
+                if key == "action" and values[0].startswith("in.("):
+                    rows = [row for row in rows if row.get("action") in values[0][4:-1].split(",")]
+                elif not values[0].startswith(("gte.", "lt.", "in.", "not.")):
                     rows = [row for row in rows if str(row.get(key)) == expected]
             self.reply(200, rows)
 
@@ -161,6 +164,9 @@ def test_login_sets_httponly_session_and_resolves_one_role(supabase, frontend, e
         assert "access_token" not in response.text and "refresh" not in response.text
         me = c.get("/api/auth/me")
         assert me.status_code == 200 and me.json()["role"] == role
+        # The Supabase user id is kept server-side for the save audit only.
+        assert "auth_user_id" not in data and "auth_user_id" not in me.json()
+        assert ACCOUNTS[email] not in response.text + me.text
 
 
 @pytest.mark.parametrize("email,password,status,code", [
@@ -237,6 +243,35 @@ def test_pages_redirect_to_login_and_to_the_users_own_area(supabase, frontend):
             assert c.get("/login", params={"next": unsafe}).headers["location"] == "/student"
 
 
+def test_student_changes_hide_save_audit_rows(supabase, frontend, monkeypatch):
+    """A 'create' audit row (written when an admin saves a timetable) is not a change to show students."""
+    settings, state = supabase
+    section, intake, session_id = uid(501), uid(601), uid(411)
+    starts = "2026-11-10T02:00:00+00:00"
+    booking = {"id": session_id, "section_id": section, "starts_at": starts, "status": "scheduled"}
+    monkeypatch.setitem(TABLES, "students", [{**TABLES["students"][0], "student_intakes": [
+        {"group_number": 1, "intakes": {"id": intake, "intake_code": "I1"}}]}])
+    monkeypatch.setitem(TABLES, "course_offerings", [{"id": uid(701), "intake_id": intake,
+                                                      "class_sections": [{"id": section, "group_number": 1}]}])
+    monkeypatch.setitem(TABLES, "class_session_details", [{
+        **booking, "room_id": None, "lecturer_id": None, "ends_at": "2026-11-10T03:30:00+00:00",
+        "course_code": "C1", "course_name": "Subject", "course_type": "lecture"}])
+    monkeypatch.setitem(TABLES, "schedule_changes", [
+        {"action": action, "reason": None, "old_values": old, "new_values": {"starts_at": starts},
+         "created_at": "2026-11-09T01:00:00+00:00", "class_session_id": session_id, "class_sessions": booking}
+        for action, old in (("create", {}), ("reschedule", {"starts_at": "2026-11-09T02:00:00+00:00"}))])
+    week = {"start": "2026-11-09T00:00:00+08:00", "end": "2026-11-16T00:00:00+08:00"}
+    with client(settings, frontend) as c:
+        login(c, "student@example.test")
+        response = c.get("/api/student/TP000001/timetable", params=week)
+        assert response.status_code == 200, response.text
+        data = response.json()
+    assert [change["action"] for change in data["recent_changes"]] == ["reschedule"]
+    assert data["classes"][0]["latest_change"]["action"] == "reschedule"
+    query = next(call for call in state["calls"] if call["path"] == "/rest/v1/schedule_changes")
+    assert query["params"]["action"] == ["in.(cancel,reschedule)"]
+
+
 def test_student_can_only_read_their_own_timetable(supabase, frontend):
     settings, _ = supabase
     week = {"start": "2026-11-09T00:00:00+08:00", "end": "2026-11-16T00:00:00+08:00"}
@@ -275,7 +310,10 @@ def test_admin_can_read_any_record_and_reschedule_on_behalf(supabase, frontend):
         assert c.get("/api/student/TP000001").status_code == 200
         move = {"session_date": "2026-11-20", "start_time": "10:00", "room_id": uid(9)}
         assert c.patch(f"/api/lecturers/{uid(202)}/sessions/{uid(401)}", json=move).status_code == 200
-    assert any(call["method"] == "PATCH" for call in state["calls"])
+        # A cancelled class cannot be moved (that would silently reactivate it).
+        assert c.patch(f"/api/lecturers/{uid(202)}/sessions/{uid(402)}", json=move).status_code == 409
+    patches = [call for call in state["calls"] if call["method"] == "PATCH"]
+    assert len(patches) == 1 and patches[0]["body"]["status"] == "rescheduled"
 
 
 def test_scheduling_page_and_apis_require_an_admin(supabase, frontend):
@@ -324,7 +362,7 @@ def test_missing_supabase_configuration_is_reported(frontend, monkeypatch):
 def test_dependency_override_is_available_for_other_tests(frontend):
     """Other suites act as a user by overriding get_session."""
     app = create_app(load_settings(), frontend)
-    app.dependency_overrides[get_session] = lambda: SessionUser(role="admin", name="T", profile_id=uid(1), home="/admin")
+    app.dependency_overrides[get_session] = lambda: SessionUser(role="admin", name="T", profile_id=uid(1), home="/admin", auth_user_id=uid(2))
     with TestClient(app, base_url=BASE, follow_redirects=False) as c:
         assert c.get("/api/auth/me").json()["role"] == "admin"
         assert c.get("/").headers["location"] == "/admin"

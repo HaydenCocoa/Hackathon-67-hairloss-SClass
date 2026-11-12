@@ -116,5 +116,5 @@ Local stand-ins only; the hosted Supabase project was not contacted.
 - All Supabase Auth requests come from the backend's address, so Supabase's per-IP login rate limit is shared by all users of one server.
 - The student page still has its own "Switch" button and code box (not changed, decision 7); entering another student's code now returns 403.
 - The backend still reads data with the service key and enforces access in Python; the database's row-level security policies (which use `auth.uid()`) are not used by these requests.
-- The save audit (`schedule_changes.changed_by`) is now possible because the admin is known, but is not implemented (needs a database change to allow a "create" action).
+- The save audit was implemented on 12 November using the session's Supabase user id ([save audit](save-audit.md)). `SessionUser.auth_user_id` is server-side only and is not returned by `/api/auth/*`.
 - `frontend/src/student/README.md` and `frontend/src/lecturer/README.md` still mention the old `#/student` and `#/lecturer` addresses; they belong to those pages' owners and were left unchanged.

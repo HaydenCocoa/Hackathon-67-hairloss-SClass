@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from .auth import SessionUser, require_login, require_roles
 from .config import SupabaseSettings
+from .scheduling.requirements import ACTIVE_BOOKING_STATUSES
 
 # Classes are scheduled and shown in Malaysia time (UTC+8, no daylight saving).
 MY_TZ = timezone(timedelta(hours=8))
