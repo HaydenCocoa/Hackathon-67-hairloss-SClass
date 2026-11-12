@@ -4,8 +4,8 @@ Reads Supabase through the Data API with the server-only key, so rows are
 filtered here by the student's intake/group memberships (the service key
 bypasses RLS).
 
-TODO (after login is ready): take the student from the signed-in session
-instead of the URL, so students can only open their own timetable.
+Login is required: a student may only open their own code (checked against the
+session); admins may open any student.
 """
 
 import os
@@ -14,10 +14,13 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from .auth import SessionUser, require_roles
 from .config import SupabaseSettings
+
+STUDENT_OR_ADMIN = require_roles("student", "admin")
 
 STUDENT_CODE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 MAX_RANGE = timedelta(days=31)
@@ -97,6 +100,26 @@ class Timetable(BaseModel):
 
 # ---------- Supabase helpers ----------
 
+class SupabaseReadError(HTTPException):
+    """Safe table-read failure with the upstream status retained for tracing."""
+
+    def __init__(self, table: str, provider_status: int):
+        self.provider_status = provider_status
+        super().__init__(502, f"Supabase could not read '{table}' (HTTP {provider_status}).")
+
+
+class SupabaseWriteError(HTTPException):
+    """Safe insert failure. Keeps only the HTTP status and an allowlisted Postgres
+    error code for classification; never the provider message, details or hint."""
+
+    SAFE_CODES = {"23505", "23503", "23514", "P0001", "42501", "40001", "40P01"}
+
+    def __init__(self, table: str, provider_status: int, provider_code: str | None):
+        self.provider_status = provider_status
+        self.provider_code = provider_code if provider_code in self.SAFE_CODES else None
+        super().__init__(502, f"Supabase could not write '{table}' (HTTP {provider_status}).")
+
+
 class Supabase:
     def __init__(self, settings: SupabaseSettings, client: httpx.AsyncClient):
         self.url = os.getenv(settings.url_env, "").strip().rstrip("/")
@@ -119,7 +142,33 @@ class Supabase:
         except httpx.RequestError:
             raise HTTPException(502, "Could not reach Supabase. Check the project URL and network.")
         if response.status_code != 200:
-            raise HTTPException(502, f"Supabase could not read '{table}' (HTTP {response.status_code}).")
+            raise SupabaseReadError(table, response.status_code)
+        try:
+            body = response.json()
+        except ValueError:
+            body = None
+        if not isinstance(body, list):
+            raise HTTPException(502, "Supabase returned an unexpected response.")
+        return body
+
+    async def insert(self, table: str, rows: list[dict[str, Any]], returning: str) -> list[dict[str, Any]]:
+        """Bulk insert in ONE request. PostgREST runs it as a single statement,
+        so either every row is written or none is."""
+        try:
+            response = await self.client.post(
+                f"{self.url}/rest/v1/{table}", params=[("select", returning)], json=rows, timeout=self.timeout,
+                headers={**self.headers, "Content-Type": "application/json", "Prefer": "return=representation"},
+            )
+        except httpx.TimeoutException:
+            raise HTTPException(504, "Supabase timed out while saving.")
+        except httpx.RequestError:
+            raise HTTPException(502, "Could not reach Supabase. Check the project URL and network.")
+        if response.status_code != 201:
+            try:
+                code = response.json().get("code")
+            except (ValueError, AttributeError):
+                code = None
+            raise SupabaseWriteError(table, response.status_code, code if isinstance(code, str) else None)
         try:
             body = response.json()
         except ValueError:
@@ -194,8 +243,14 @@ def to_change(row: dict, rooms: dict) -> Change:
 def create_student_router(settings: SupabaseSettings) -> APIRouter:
     router = APIRouter(prefix="/api/student", tags=["student"])
 
+    def check_owner(session: SessionUser, student_code: str) -> None:
+        # Students may only open their own record; admins may open any.
+        if session.role == "student" and (session.code or "").upper() != student_code.upper():
+            raise HTTPException(403, "You can only view your own timetable.")
+
     @router.get("/{student_code}", response_model=StudentProfile)
-    async def student_profile(student_code: str, request: Request):
+    async def student_profile(student_code: str, request: Request, session: SessionUser = Depends(STUDENT_OR_ADMIN)):
+        check_owner(session, student_code)
         db = Supabase(settings, request.app.state.http_client)
         return await load_student(db, student_code)
 
@@ -205,7 +260,9 @@ def create_student_router(settings: SupabaseSettings) -> APIRouter:
         request: Request,
         start: datetime = Query(description="Start of the range (ISO 8601), e.g. Monday 00:00 local time"),
         end: datetime = Query(description="End of the range (exclusive), at most 31 days after start"),
+        session: SessionUser = Depends(STUDENT_OR_ADMIN),
     ):
+        check_owner(session, student_code)
         start, end = (t if t.tzinfo else t.replace(tzinfo=timezone.utc) for t in (start, end))
         if end <= start or (end - start) > MAX_RANGE:
             raise HTTPException(422, "end must be after start and within 31 days.")
